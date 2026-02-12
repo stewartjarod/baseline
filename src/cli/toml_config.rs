@@ -20,6 +20,9 @@ pub struct GuardrailsSection {
     pub exclude: Vec<String>,
     #[serde(default)]
     pub extends: Vec<String>,
+    /// Paths to plugin TOML files containing additional rules
+    #[serde(default)]
+    pub plugins: Vec<String>,
 }
 
 /// A single `[[rule]]` entry.
@@ -45,6 +48,13 @@ pub struct TomlRule {
     #[serde(default)]
     pub regex: bool,
     pub manifest: Option<String>,
+    #[serde(default)]
+    pub exclude_glob: Vec<String>,
+    pub file_contains: Option<String>,
+    pub file_not_contains: Option<String>,
+    #[serde(default)]
+    pub required_files: Vec<String>,
+    pub condition_pattern: Option<String>,
 }
 
 fn default_severity() -> String {
@@ -67,6 +77,11 @@ impl Default for TomlRule {
             packages: Vec::new(),
             regex: false,
             manifest: None,
+            exclude_glob: Vec::new(),
+            file_contains: None,
+            file_not_contains: None,
+            required_files: Vec::new(),
+            condition_pattern: None,
         }
     }
 }
@@ -92,6 +107,11 @@ impl TomlRule {
             packages: self.packages.clone(),
             regex: self.regex,
             manifest: self.manifest.clone(),
+            exclude_glob: self.exclude_glob.clone(),
+            file_contains: self.file_contains.clone(),
+            file_not_contains: self.file_not_contains.clone(),
+            required_files: self.required_files.clone(),
+            condition_pattern: self.condition_pattern.clone(),
         }
     }
 }
