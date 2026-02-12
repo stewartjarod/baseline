@@ -1,6 +1,7 @@
-use crate::cli::toml_config::TomlConfig;
+use crate::cli::toml_config::{TomlConfig, TomlRule};
 use crate::presets::{self, PresetError};
 use crate::rules::factory::{self, FactoryError};
+use crate::rules::file_presence::FilePresenceRule;
 use crate::rules::{Rule, ScanContext, Violation};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
@@ -9,6 +10,13 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// A plugin config file containing additional rules.
+#[derive(Debug, serde::Deserialize)]
+struct PluginConfig {
+    #[serde(default)]
+    rule: Vec<crate::cli::toml_config::TomlRule>,
+}
 
 #[derive(Debug)]
 pub enum ScanError {
@@ -54,31 +62,41 @@ pub struct BaselineResult {
     pub files_scanned: usize,
 }
 
-/// Run a full scan: parse config, build rules, walk files, collect violations.
-pub fn run_scan(config_path: &Path, target_paths: &[PathBuf]) -> Result<ScanResult, ScanError> {
-    // 1. Read and parse TOML config
-    let config_text = fs::read_to_string(config_path).map_err(ScanError::ConfigRead)?;
-    let toml_config: TomlConfig = toml::from_str(&config_text).map_err(ScanError::ConfigParse)?;
+/// A fully-built rule with all its compiled metadata.
+/// This avoids index-mismatch bugs by keeping conditioning data
+/// alongside the rule rather than looking it up by index.
+struct BuiltRule {
+    rule: Box<dyn Rule>,
+    inclusion_glob: Option<GlobSet>,
+    exclusion_glob: Option<GlobSet>,
+    file_contains: Option<String>,
+    file_not_contains: Option<String>,
+}
 
-    // 2. Resolve presets and merge with user-defined rules
-    let resolved_rules = presets::resolve_rules(
-        &toml_config.guardrails.extends,
-        &toml_config.rule,
-    )
-    .map_err(ScanError::Preset)?;
+/// Result of building rules from config.
+struct BuiltRules {
+    rules: Vec<BuiltRule>,
+    ratchet_thresholds: HashMap<String, usize>,
+    file_presence_rules: Vec<FilePresenceRule>,
+}
 
-    // 3. Build exclude glob set
-    // Include patterns are advisory for project-wide scanning; CLI-provided targets
-    // override them (the user explicitly chose what to scan). Exclude patterns still
-    // apply to skip directories like node_modules.
-    let exclude_set = build_glob_set(&toml_config.guardrails.exclude)?;
-
-    // 4. Build rules via factory, tracking ratchet metadata
-    let mut rules: Vec<(Box<dyn Rule>, Option<GlobSet>)> = Vec::new();
+/// Build rules from resolved TOML rules. Shared by run_scan and run_scan_stdin.
+fn build_rules(resolved_rules: &[TomlRule]) -> Result<BuiltRules, ScanError> {
+    let mut rules: Vec<BuiltRule> = Vec::new();
     let mut ratchet_thresholds: HashMap<String, usize> = HashMap::new();
+    let mut file_presence_rules: Vec<FilePresenceRule> = Vec::new();
 
-    for toml_rule in &resolved_rules {
+    for toml_rule in resolved_rules {
         let rule_config = toml_rule.to_rule_config();
+
+        // File-presence rules are handled separately (they check existence, not content)
+        if toml_rule.rule_type == "file-presence" {
+            if let Ok(fp_rule) = FilePresenceRule::new(&rule_config) {
+                file_presence_rules.push(fp_rule);
+            }
+            continue;
+        }
+
         let rule = factory::build_rule(&toml_rule.rule_type, &rule_config)
             .map_err(ScanError::RuleFactory)?;
 
@@ -88,8 +106,8 @@ pub fn run_scan(config_path: &Path, target_paths: &[PathBuf]) -> Result<ScanResu
             }
         }
 
-        // Build per-rule glob if specified
-        let rule_glob = if let Some(ref pattern) = rule.file_glob() {
+        // Build per-rule inclusion glob
+        let inclusion_glob = if let Some(ref pattern) = rule.file_glob() {
             let gs = GlobSetBuilder::new()
                 .add(Glob::new(pattern).map_err(ScanError::GlobParse)?)
                 .build()
@@ -99,15 +117,134 @@ pub fn run_scan(config_path: &Path, target_paths: &[PathBuf]) -> Result<ScanResu
             None
         };
 
-        rules.push((rule, rule_glob));
+        // Build per-rule exclusion glob
+        let exclusion_glob = if !toml_rule.exclude_glob.is_empty() {
+            Some(build_glob_set(&toml_rule.exclude_glob)?)
+        } else {
+            None
+        };
+
+        rules.push(BuiltRule {
+            rule,
+            inclusion_glob,
+            exclusion_glob,
+            file_contains: toml_rule.file_contains.clone(),
+            file_not_contains: toml_rule.file_not_contains.clone(),
+        });
     }
 
-    let rules_loaded = rules.len();
+    Ok(BuiltRules {
+        rules,
+        ratchet_thresholds,
+        file_presence_rules,
+    })
+}
 
-    // 4. Walk target paths and collect files
+/// Check if a rule matches a file path (inclusion + exclusion globs).
+fn rule_matches_file(built: &BuiltRule, file_str: &str, file_name: &str) -> bool {
+    let included = match &built.inclusion_glob {
+        Some(gs) => gs.is_match(file_str) || gs.is_match(file_name),
+        None => true,
+    };
+    if !included {
+        return false;
+    }
+    if let Some(ref exc) = built.exclusion_glob {
+        if exc.is_match(file_str) || exc.is_match(file_name) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Check file-context conditioning (file_contains / file_not_contains).
+fn passes_file_conditioning(built: &BuiltRule, content: &str) -> bool {
+    if let Some(ref needle) = built.file_contains {
+        if !content.contains(needle.as_str()) {
+            return false;
+        }
+    }
+    if let Some(ref needle) = built.file_not_contains {
+        if content.contains(needle.as_str()) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Run rules against content and collect violations, filtering escape-hatch comments.
+fn run_rules_on_content(
+    built_rules: &[BuiltRule],
+    file_path: &Path,
+    content: &str,
+    file_str: &str,
+    file_name: &str,
+) -> Vec<Violation> {
+    let mut violations = Vec::new();
+    let content_lines: Vec<&str> = content.lines().collect();
+    let ctx = ScanContext {
+        file_path,
+        content,
+    };
+
+    for built in built_rules {
+        if !rule_matches_file(built, file_str, file_name) {
+            continue;
+        }
+        if !passes_file_conditioning(built, content) {
+            continue;
+        }
+
+        let file_violations = built.rule.check_file(&ctx);
+        for v in file_violations {
+            if let Some(line_num) = v.line {
+                if is_suppressed(&content_lines, line_num, &v.rule_id) {
+                    continue;
+                }
+            }
+            violations.push(v);
+        }
+    }
+
+    violations
+}
+
+/// Run a full scan: parse config, build rules, walk files, collect violations.
+pub fn run_scan(config_path: &Path, target_paths: &[PathBuf]) -> Result<ScanResult, ScanError> {
+    // 1. Read and parse TOML config
+    let config_text = fs::read_to_string(config_path).map_err(ScanError::ConfigRead)?;
+    let toml_config: TomlConfig = toml::from_str(&config_text).map_err(ScanError::ConfigParse)?;
+
+    // 2. Load plugin rules from external TOML files
+    let mut plugin_rules: Vec<crate::cli::toml_config::TomlRule> = Vec::new();
+    for plugin_path in &toml_config.guardrails.plugins {
+        let plugin_text = fs::read_to_string(plugin_path).map_err(ScanError::ConfigRead)?;
+        let plugin_config: PluginConfig =
+            toml::from_str(&plugin_text).map_err(ScanError::ConfigParse)?;
+        plugin_rules.extend(plugin_config.rule);
+    }
+
+    // 3. Resolve presets and merge with user-defined rules + plugin rules
+    let mut all_user_rules = toml_config.rule.clone();
+    all_user_rules.extend(plugin_rules);
+
+    let resolved_rules = presets::resolve_rules(
+        &toml_config.guardrails.extends,
+        &all_user_rules,
+    )
+    .map_err(ScanError::Preset)?;
+
+    // 4. Build exclude glob set
+    let exclude_set = build_glob_set(&toml_config.guardrails.exclude)?;
+
+    // 5. Build rules via factory
+    let built = build_rules(&resolved_rules)?;
+    let rules_loaded = built.rules.len();
+
+    // 6. Walk target paths and collect files
     let files = collect_files(target_paths, &exclude_set);
 
-    // 5. Run rules on each file
+    // 7. Run rules on each file
     let mut violations: Vec<Violation> = Vec::new();
     let mut files_scanned = 0;
 
@@ -116,19 +253,8 @@ pub fn run_scan(config_path: &Path, target_paths: &[PathBuf]) -> Result<ScanResu
         let file_name = file_path.file_name().unwrap_or_default().to_string_lossy();
 
         // Pre-check: does ANY rule match this file? If not, skip the read entirely.
-        let matching_rules: Vec<usize> = rules
-            .iter()
-            .enumerate()
-            .filter(|(_, (_, rule_glob))| {
-                match rule_glob {
-                    Some(gs) => gs.is_match(&*file_str) || gs.is_match(&*file_name),
-                    None => true, // no glob = matches all files
-                }
-            })
-            .map(|(i, _)| i)
-            .collect();
-
-        if matching_rules.is_empty() {
+        let any_match = built.rules.iter().any(|r| rule_matches_file(r, &file_str, &file_name));
+        if !any_match {
             continue;
         }
 
@@ -138,19 +264,19 @@ pub fn run_scan(config_path: &Path, target_paths: &[PathBuf]) -> Result<ScanResu
         };
 
         files_scanned += 1;
-        let ctx = ScanContext {
-            file_path,
-            content: &content,
-        };
-
-        for i in &matching_rules {
-            let mut file_violations = rules[*i].0.check_file(&ctx);
-            violations.append(&mut file_violations);
-        }
+        let mut file_violations =
+            run_rules_on_content(&built.rules, file_path, &content, &file_str, &file_name);
+        violations.append(&mut file_violations);
     }
 
-    // 6. Apply ratchet thresholds
-    let ratchet_counts = apply_ratchet_thresholds(&mut violations, &ratchet_thresholds);
+    // 8. Run file-presence checks
+    for fp_rule in &built.file_presence_rules {
+        let mut fp_violations = fp_rule.check_paths(target_paths);
+        violations.append(&mut fp_violations);
+    }
+
+    // 9. Apply ratchet thresholds
+    let ratchet_counts = apply_ratchet_thresholds(&mut violations, &built.ratchet_thresholds);
 
     Ok(ScanResult {
         violations,
@@ -195,6 +321,42 @@ fn apply_ratchet_thresholds(
     }
 
     result
+}
+
+/// Run a scan on stdin content with a virtual filename.
+pub fn run_scan_stdin(
+    config_path: &Path,
+    content: &str,
+    filename: &str,
+) -> Result<ScanResult, ScanError> {
+    let config_text = fs::read_to_string(config_path).map_err(ScanError::ConfigRead)?;
+    let toml_config: TomlConfig = toml::from_str(&config_text).map_err(ScanError::ConfigParse)?;
+
+    let resolved_rules = presets::resolve_rules(
+        &toml_config.guardrails.extends,
+        &toml_config.rule,
+    )
+    .map_err(ScanError::Preset)?;
+
+    let built = build_rules(&resolved_rules)?;
+    let rules_loaded = built.rules.len();
+
+    let file_path = PathBuf::from(filename);
+    let file_str = file_path.to_string_lossy();
+    let file_name = file_path.file_name().unwrap_or_default().to_string_lossy();
+
+    let violations =
+        run_rules_on_content(&built.rules, &file_path, content, &file_str, &file_name);
+
+    let mut violations = violations;
+    let ratchet_counts = apply_ratchet_thresholds(&mut violations, &built.ratchet_thresholds);
+
+    Ok(ScanResult {
+        violations,
+        files_scanned: 1,
+        rules_loaded,
+        ratchet_counts,
+    })
 }
 
 /// Run baseline counting: parse config, build only ratchet rules, count matches.
@@ -285,6 +447,34 @@ pub fn run_baseline(
     })
 }
 
+/// Check if a violation is suppressed by an escape-hatch comment.
+/// Looks for `guardrails:allow-{rule_id}` on the same line or the line before.
+fn is_suppressed(lines: &[&str], line_num: usize, rule_id: &str) -> bool {
+    let allow_marker = format!("guardrails:allow-{}", rule_id);
+    let allow_all = "guardrails:allow-all";
+
+    // Check current line (1-indexed)
+    if line_num > 0 && line_num <= lines.len() {
+        let line = lines[line_num - 1];
+        if line.contains(&allow_marker) || line.contains(allow_all) {
+            return true;
+        }
+    }
+
+    // Check previous line (next-line style: `// guardrails:allow-next-line`)
+    if line_num >= 2 && line_num <= lines.len() {
+        let prev = lines[line_num - 2];
+        let allow_next = format!("guardrails:allow-next-line {}", rule_id);
+        if prev.contains(&allow_next)
+            || prev.contains("guardrails:allow-next-line all")
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn collect_files(target_paths: &[PathBuf], exclude_set: &GlobSet) -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = Vec::new();
     for target in target_paths {
@@ -338,6 +528,7 @@ mod tests {
             message: "test".to_string(),
             suggest: None,
             source_line: None,
+            fix: None,
         }
     }
 
@@ -423,5 +614,81 @@ mod tests {
 
         assert!(violations.is_empty());
         assert_eq!(counts["ratchet-zero"], (0, 0));
+    }
+
+    // ── is_suppressed tests ──
+
+    #[test]
+    fn suppressed_by_same_line_allow() {
+        let lines = vec![
+            "let x = style={{ color: 'red' }}; // guardrails:allow-no-inline-styles",
+        ];
+        assert!(is_suppressed(&lines, 1, "no-inline-styles"));
+    }
+
+    #[test]
+    fn suppressed_by_allow_all() {
+        let lines = vec![
+            "let x = style={{ color: 'red' }}; // guardrails:allow-all",
+        ];
+        assert!(is_suppressed(&lines, 1, "no-inline-styles"));
+        assert!(is_suppressed(&lines, 1, "any-other-rule"));
+    }
+
+    #[test]
+    fn suppressed_by_allow_next_line() {
+        let lines = vec![
+            "// guardrails:allow-next-line no-inline-styles",
+            "let x = style={{ color: 'red' }};",
+        ];
+        assert!(is_suppressed(&lines, 2, "no-inline-styles"));
+    }
+
+    #[test]
+    fn suppressed_by_allow_next_line_all() {
+        let lines = vec![
+            "// guardrails:allow-next-line all",
+            "let x = style={{ color: 'red' }};",
+        ];
+        assert!(is_suppressed(&lines, 2, "no-inline-styles"));
+    }
+
+    #[test]
+    fn not_suppressed_wrong_rule_id() {
+        let lines = vec![
+            "let x = style={{ color: 'red' }}; // guardrails:allow-other-rule",
+        ];
+        assert!(!is_suppressed(&lines, 1, "no-inline-styles"));
+    }
+
+    #[test]
+    fn not_suppressed_no_comment() {
+        let lines = vec![
+            "let x = style={{ color: 'red' }};",
+        ];
+        assert!(!is_suppressed(&lines, 1, "no-inline-styles"));
+    }
+
+    #[test]
+    fn not_suppressed_next_line_wrong_rule() {
+        let lines = vec![
+            "// guardrails:allow-next-line other-rule",
+            "let x = style={{ color: 'red' }};",
+        ];
+        assert!(!is_suppressed(&lines, 2, "no-inline-styles"));
+    }
+
+    #[test]
+    fn suppressed_line_zero_is_safe() {
+        let lines = vec!["some content"];
+        // line_num 0 should not panic
+        assert!(!is_suppressed(&lines, 0, "any-rule"));
+    }
+
+    #[test]
+    fn suppressed_past_end_is_safe() {
+        let lines = vec!["some content"];
+        // line_num past end should not panic
+        assert!(!is_suppressed(&lines, 5, "any-rule"));
     }
 }
