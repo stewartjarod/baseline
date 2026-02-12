@@ -64,10 +64,10 @@ Run `cargo check` to verify the project still compiles after the version bump. I
 
 ### Step 5: Commit and tag
 
-Stage `Cargo.toml` and `CHANGELOG.md`, then commit:
+Stage `Cargo.toml`, `Cargo.lock`, and `CHANGELOG.md`, then commit:
 
 ```
-git add Cargo.toml CHANGELOG.md
+git add Cargo.toml Cargo.lock CHANGELOG.md
 git commit -m "chore: release v{new_version}"
 ```
 
