@@ -1,6 +1,6 @@
 {
   "name": "code-guardrails",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Enforce architectural decisions AI coding tools keep ignoring",
   "license": "MIT",
   "repository": {
@@ -14,11 +14,11 @@
     "bin/guardrails"
   ],
   "optionalDependencies": {
-    "code-guardrails-darwin-arm64": "0.3.0",
-    "code-guardrails-darwin-x64": "0.3.0",
-    "code-guardrails-linux-x64": "0.3.0",
-    "code-guardrails-linux-arm64": "0.3.0",
-    "code-guardrails-win32-x64": "0.3.0"
+    "code-guardrails-darwin-arm64": "0.3.1",
+    "code-guardrails-darwin-x64": "0.3.1",
+    "code-guardrails-linux-x64": "0.3.1",
+    "code-guardrails-linux-arm64": "0.3.1",
+    "code-guardrails-win32-x64": "0.3.1"
   },
   "keywords": [
     "linter",

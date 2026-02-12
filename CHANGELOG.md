@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.3.1] - 2026-02-12
+
+### Bug Fixes
+- mark platform binaries as executable via bin field (93b4dd6)
+- upgrade npm CLI for trusted publishing OIDC support (5d8bc4a)
+- download artifacts to separate dir in npm release workflow (7548f1a)
+
 ## [v0.3.0] - 2026-02-12
 
 ### Features
