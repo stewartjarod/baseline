@@ -23,6 +23,9 @@ exclude = [
     "**/vendor/**",
 ]
 
+# Plugin files: load additional rules from external TOML files
+# plugins = ["./plugins/react-rules.toml", "./plugins/security-rules.toml"]
+
 
 # ══════════════════════════════════════════════
 # TAILWIND + SHADCN RULES
@@ -31,10 +34,7 @@ exclude = [
 # ──────────────────────────────────────────────
 # Tailwind Dark Mode Enforcement
 # Ensures every hardcoded Tailwind color class
-# has a corresponding dark: variant. shadcn semantic
-# tokens (bg-background, text-foreground, etc.) are
-# allowed automatically since they handle theming
-# via CSS custom properties.
+# has a corresponding dark: variant.
 # ──────────────────────────────────────────────
 
 # [[rule]]
@@ -44,16 +44,11 @@ exclude = [
 # glob = "**/*.{tsx,jsx}"
 # message = "Missing dark: variant for color class"
 # suggest = "Use a shadcn semantic token or add a dark: counterpart"
-# # Extra classes that don't need dark: variants:
 # allowed_classes = ["bg-brand-gradient"]
-
+# exclude_glob = ["**/components/ui/**"]
 
 # ──────────────────────────────────────────────
 # shadcn Theme Token Enforcement
-# Bans raw Tailwind color classes (bg-white, text-gray-900)
-# in favor of CSS-variable-based semantic tokens
-# (bg-background, text-foreground, bg-muted, etc.)
-# Ships with a comprehensive default mapping.
 # ──────────────────────────────────────────────
 
 # [[rule]]
@@ -62,21 +57,17 @@ exclude = [
 # severity = "warning"
 # glob = "**/*.{tsx,jsx}"
 # message = "Use shadcn semantic token instead of raw color"
-# # Extend the default mapping with your own brand tokens:
 # token_map = ["bg-indigo-600=bg-brand", "text-indigo-50=text-brand-foreground"]
-# # Allow specific raw colors that are intentionally unthemed:
 # allowed_classes = ["bg-green-500"]
+# exclude_glob = ["**/components/ui/**"]
 
 
 # ══════════════════════════════════════════════
 # MIGRATION RULES
-# Enforce a clean migration to Tailwind by banning
-# conflicting patterns, imports, and dependencies.
 # ══════════════════════════════════════════════
 
 # ──────────────────────────────────────────────
 # Banned Patterns
-# Prevent specific code patterns from appearing
 # ──────────────────────────────────────────────
 
 [[rule]]
@@ -88,28 +79,8 @@ glob = "**/*.{tsx,jsx}"
 message = "Avoid inline styles — use Tailwind utility classes instead"
 suggest = "Replace style={{ ... }} with Tailwind classes"
 
-# [[rule]]
-# id = "no-console-log"
-# type = "banned-pattern"
-# severity = "warning"
-# pattern = "console.log("
-# glob = "src/**/*.{ts,tsx}"
-# message = "Remove console.log before committing — use the logger instead"
-# suggest = "import { logger } from '@company/logger'"
-
-# [[rule]]
-# id = "no-ts-ignore"
-# type = "banned-pattern"
-# severity = "warning"
-# pattern = "@ts-ignore"
-# regex = false
-# glob = "src/**/*.{ts,tsx}"
-# message = "Use @ts-expect-error instead of @ts-ignore"
-
-
 # ──────────────────────────────────────────────
 # Banned Imports
-# Prevent usage of deprecated or unwanted packages
 # ──────────────────────────────────────────────
 
 [[rule]]
@@ -119,18 +90,8 @@ severity = "error"
 packages = ["styled-components", "@emotion/styled", "@emotion/css", "@emotion/react"]
 message = "CSS-in-JS libraries conflict with Tailwind — use utility classes instead"
 
-# [[rule]]
-# id = "no-moment"
-# type = "banned-import"
-# severity = "error"
-# packages = ["moment", "moment-timezone"]
-# message = "moment.js is deprecated — use date-fns or Temporal API"
-# suggest = "import { format } from 'date-fns'"
-
-
 # ──────────────────────────────────────────────
 # Banned Dependencies
-# Prevent packages from appearing in manifests
 # ──────────────────────────────────────────────
 
 [[rule]]
@@ -140,26 +101,12 @@ severity = "error"
 packages = ["bootstrap", "bulma", "@mui/material", "antd"]
 message = "Competing CSS framework detected — this project uses Tailwind"
 
-# [[rule]]
-# id = "no-request-package"
-# type = "banned-dependency"
-# severity = "error"
-# packages = ["request", "request-promise"]
-# manifest = "package.json"
-# message = "The 'request' package is deprecated — use 'node-fetch' or 'undici'"
-
 
 # ══════════════════════════════════════════════
-# COMING IN v2
-# These rule types are planned but not yet implemented.
+# RATCHET RULES
+# Enforce decreasing counts of legacy patterns.
+# Use `guardrails baseline` to find current count.
 # ══════════════════════════════════════════════
-
-# ──────────────────────────────────────────────
-# Ratchet Rules
-# Enforce decreasing counts of legacy patterns over time.
-# Use `guardrails baseline` to find current count,
-# then set max_count and decrease it as you refactor.
-# ──────────────────────────────────────────────
 
 # [[rule]]
 # id = "ratchet-legacy-fetch"
@@ -169,13 +116,24 @@ message = "Competing CSS framework detected — this project uses Tailwind"
 # max_count = 47
 # glob = "src/**/*.ts"
 # message = "Migrate remaining legacyFetch calls to apiFetch"
-# suggest = "import { apiFetch } from '@company/http'"
+# regex = false        # set to true for regex pattern matching
+
+# [[rule]]
+# id = "ratchet-hex-colors"
+# type = "ratchet"
+# severity = "warning"
+# pattern = "#[0-9a-fA-F]{3,8}"
+# regex = true
+# max_count = 20
+# glob = "**/*.{tsx,jsx,css}"
+# message = "Migrate hardcoded hex colors to CSS variables"
 
 
-# ──────────────────────────────────────────────
-# Required Patterns
-# Ensure certain patterns exist in matching files
-# ──────────────────────────────────────────────
+# ══════════════════════════════════════════════
+# REQUIRED PATTERNS
+# Ensure certain patterns exist in matching files.
+# Supports optional condition_pattern for "if X then Y" logic.
+# ══════════════════════════════════════════════
 
 # [[rule]]
 # id = "error-boundary-in-pages"
@@ -185,15 +143,104 @@ message = "Competing CSS framework detected — this project uses Tailwind"
 # pattern = "ErrorBoundary"
 # message = "All page components must wrap content in an ErrorBoundary"
 
+# [[rule]]
+# id = "validate-post-handlers"
+# type = "required-pattern"
+# severity = "error"
+# glob = "src/api/**/*.ts"
+# pattern = "validateInput"
+# condition_pattern = "app.post("
+# message = "POST handlers must validate input"
 
-# ──────────────────────────────────────────────
-# File Presence
-# Ensure required project files exist
-# ──────────────────────────────────────────────
+
+# ══════════════════════════════════════════════
+# FILE PRESENCE
+# Ensure required project files exist.
+# ══════════════════════════════════════════════
 
 # [[rule]]
 # id = "has-readme"
 # type = "file-presence"
 # severity = "warning"
-# required_files = ["README.md", "LICENSE"]
-# message = "Projects must have a README.md and LICENSE file"
+# required_files = ["README.md", "LICENSE", ".env.example"]
+# message = "Projects must have required documentation files"
+
+
+# ══════════════════════════════════════════════
+# WINDOW / PROXIMITY RULES
+# Enforce that two patterns appear within N lines.
+# pattern = trigger, condition_pattern = required nearby,
+# max_count = window size (lines to search).
+# ══════════════════════════════════════════════
+
+# [[rule]]
+# id = "org-scoped-queries"
+# type = "window-pattern"
+# severity = "error"
+# pattern = "DELETE FROM"
+# condition_pattern = "organizationId"
+# max_count = 80
+# glob = "src/**/*.ts"
+# message = "DELETE queries must include organizationId within 80 lines"
+# suggest = "Add WHERE organizationId = $orgId to scope the query"
+
+# [[rule]]
+# id = "async-try-catch"
+# type = "window-pattern"
+# severity = "warning"
+# pattern = "async ("
+# condition_pattern = "try {"
+# max_count = 10
+# regex = true
+# glob = "src/api/**/*.ts"
+# message = "Async handlers should have try/catch within 10 lines"
+
+
+# ══════════════════════════════════════════════
+# FILE-CONTEXT CONDITIONING
+# Rules can be conditioned on file content.
+# file_contains / file_not_contains activate rules selectively.
+# ══════════════════════════════════════════════
+
+# [[rule]]
+# id = "no-private-env-in-client"
+# type = "banned-pattern"
+# severity = "error"
+# pattern = "process.env.SECRET"
+# regex = true
+# glob = "src/**/*.{ts,tsx}"
+# file_contains = "'use client'"
+# message = "Do not access private env vars in client components"
+
+# [[rule]]
+# id = "server-only-imports"
+# type = "banned-import"
+# severity = "error"
+# packages = ["@tanstack/react-query"]
+# glob = "src/**/*.ts"
+# file_not_contains = "'use client'"
+# message = "React Query is client-only — this appears to be a server component"
+
+
+# ══════════════════════════════════════════════
+# ESCAPE-HATCH COMMENTS
+# Suppress violations with inline comments:
+#   // guardrails:allow-{rule-id}          (same line)
+#   // guardrails:allow-all                (same line, any rule)
+#   // guardrails:allow-next-line {rule-id} (next line)
+# ══════════════════════════════════════════════
+
+
+# ══════════════════════════════════════════════
+# PER-RULE EXCLUSIONS
+# Any rule can use exclude_glob to skip specific paths,
+# even if they match the inclusion glob.
+# ══════════════════════════════════════════════
+
+# [[rule]]
+# id = "no-radix-direct"
+# type = "banned-import"
+# severity = "error"
+# packages = ["@radix-ui/react-dialog", "@radix-ui/react-popover"]
+# exclude_glob = ["**/components/ui/**"]
+# message = "Import shadcn wrappers, not Radix directly"
