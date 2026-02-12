@@ -116,6 +116,7 @@ fn main() {
                 OutputFormat::Compact => format::print_compact(&result),
                 OutputFormat::Github => format::print_github(&result),
                 OutputFormat::Sarif => format::print_sarif(&result),
+                OutputFormat::Markdown => format::print_markdown(&result),
             }
 
             let has_errors = result

@@ -392,6 +392,139 @@ pub fn print_sarif(result: &ScanResult) {
     println!("{}", serde_json::to_string_pretty(&sarif).unwrap());
 }
 
+/// Print violations as a Markdown report (for GitHub PR summaries).
+pub fn print_markdown(result: &ScanResult) {
+    let mut out = std::io::stdout();
+    write_markdown(result, &mut out);
+}
+
+fn write_markdown(result: &ScanResult, out: &mut dyn Write) {
+    let _ = writeln!(out, "## Guardrails Report\n");
+
+    let errors = result
+        .violations
+        .iter()
+        .filter(|v| v.severity == Severity::Error)
+        .count();
+    let warnings = result
+        .violations
+        .iter()
+        .filter(|v| v.severity == Severity::Warning)
+        .count();
+
+    // Summary line
+    if errors == 0 && warnings == 0 {
+        let _ = writeln!(out, "\\:white_check_mark: **No violations found** ({} files scanned, {} rules loaded)\n", result.files_scanned, result.rules_loaded);
+    } else {
+        let mut parts = Vec::new();
+        if errors > 0 {
+            parts.push(format!(
+                "{} error{}",
+                errors,
+                if errors == 1 { "" } else { "s" }
+            ));
+        }
+        if warnings > 0 {
+            parts.push(format!(
+                "{} warning{}",
+                warnings,
+                if warnings == 1 { "" } else { "s" }
+            ));
+        }
+        let _ = writeln!(
+            out,
+            "**{}** in {} files ({} rules loaded)\n",
+            parts.join(", "),
+            result.files_scanned,
+            result.rules_loaded
+        );
+    }
+
+    // Changed-only context
+    if let (Some(count), Some(ref base)) = (result.changed_files_count, &result.base_ref) {
+        let _ = writeln!(
+            out,
+            "> Scanned {} changed file{} against `{}`\n",
+            count,
+            if count == 1 { "" } else { "s" },
+            base
+        );
+    }
+
+    if result.violations.is_empty() && result.ratchet_counts.is_empty() {
+        return;
+    }
+
+    // Group by severity then by file
+    let error_violations: Vec<&Violation> = result
+        .violations
+        .iter()
+        .filter(|v| v.severity == Severity::Error)
+        .collect();
+    let warning_violations: Vec<&Violation> = result
+        .violations
+        .iter()
+        .filter(|v| v.severity == Severity::Warning)
+        .collect();
+
+    if !error_violations.is_empty() {
+        write_markdown_severity_section(out, "Errors", &error_violations);
+    }
+    if !warning_violations.is_empty() {
+        write_markdown_severity_section(out, "Warnings", &warning_violations);
+    }
+
+    // Ratchet section
+    if !result.ratchet_counts.is_empty() {
+        let _ = writeln!(out, "### Ratchet Rules\n");
+        let _ = writeln!(out, "| Rule | Status | Count |");
+        let _ = writeln!(out, "|------|--------|-------|");
+
+        let mut sorted: Vec<_> = result.ratchet_counts.iter().collect();
+        sorted.sort_by_key(|(id, _)| (*id).clone());
+
+        for (rule_id, &(found, max)) in &sorted {
+            let status = if found <= max {
+                "\\:white_check_mark: pass"
+            } else {
+                "\\:x: OVER"
+            };
+            let _ = writeln!(out, "| `{}` | {} | {}/{} |", rule_id, status, found, max);
+        }
+        let _ = writeln!(out);
+    }
+}
+
+fn write_markdown_severity_section(out: &mut dyn Write, title: &str, violations: &[&Violation]) {
+    let _ = writeln!(out, "### {}\n", title);
+
+    // Group by file
+    let mut by_file: BTreeMap<String, Vec<&&Violation>> = BTreeMap::new();
+    for v in violations {
+        by_file
+            .entry(v.file.display().to_string())
+            .or_default()
+            .push(v);
+    }
+
+    for (file, file_violations) in &by_file {
+        let _ = writeln!(out, "**`{}`**\n", file);
+        let _ = writeln!(out, "| Line | Rule | Message | Suggestion |");
+        let _ = writeln!(out, "|------|------|---------|------------|");
+
+        for v in file_violations {
+            let line = v.line.map(|l| l.to_string()).unwrap_or_else(|| "-".to_string());
+            let suggest = v.suggest.as_deref().unwrap_or("");
+            let _ = writeln!(
+                out,
+                "| {} | `{}` | {} | {} |",
+                line, v.rule_id, v.message, suggest
+            );
+        }
+        let _ = writeln!(out);
+    }
+}
+
 /// Apply fixes from violations to source files. Returns the number of fixes applied.
 /// Fixes are targeted to the specific line where the violation occurred to avoid
 /// accidentally replacing a different occurrence of the same pattern.

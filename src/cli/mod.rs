@@ -93,4 +93,5 @@ pub enum OutputFormat {
     Compact,
     Github,
     Sarif,
+    Markdown,
 }
