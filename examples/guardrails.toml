@@ -17,7 +17,6 @@ severity = "error"
 glob = "**/*.{tsx,jsx}"
 message = "Missing dark: variant for color class"
 suggest = "Use a shadcn semantic token class or add an explicit dark: counterpart"
-# Classes that don't need dark: variants (beyond the built-in semantic tokens)
 allowed_classes = []
 
 # ──────────────────────────────────────────────
@@ -32,7 +31,41 @@ type = "tailwind-theme-tokens"
 severity = "warning"
 glob = "**/*.{tsx,jsx}"
 message = "Use shadcn semantic token instead of raw color"
-# Extend or override the default token mapping:
-# token_map = ["bg-brand-500=bg-primary", "text-brand-500=text-primary"]
-# Allow specific raw colors that are intentionally not themed:
-# allowed_classes = ["bg-red-500"]
+
+# ──────────────────────────────────────────────
+# Ban Inline Styles
+# Catch style={{ }} in JSX — use Tailwind classes instead.
+# ──────────────────────────────────────────────
+
+[[rule]]
+id = "no-inline-styles"
+type = "banned-pattern"
+severity = "warning"
+pattern = "style={{"
+glob = "**/*.{tsx,jsx}"
+message = "Avoid inline styles — use Tailwind utility classes instead"
+suggest = "Replace style={{ ... }} with Tailwind classes"
+
+# ──────────────────────────────────────────────
+# Ban CSS-in-JS Libraries
+# If you've committed to Tailwind, these shouldn't be imported.
+# ──────────────────────────────────────────────
+
+[[rule]]
+id = "no-css-in-js"
+type = "banned-import"
+severity = "error"
+packages = ["styled-components", "@emotion/styled", "@emotion/css", "@emotion/react"]
+message = "CSS-in-JS libraries conflict with Tailwind — use utility classes instead"
+
+# ──────────────────────────────────────────────
+# Ban Competing CSS Frameworks
+# Prevent mixing multiple CSS frameworks in the same project.
+# ──────────────────────────────────────────────
+
+[[rule]]
+id = "no-competing-frameworks"
+type = "banned-dependency"
+severity = "error"
+packages = ["bootstrap", "bulma", "@mui/material", "antd"]
+message = "Competing CSS framework detected — this project uses Tailwind + shadcn/ui"

@@ -1,11 +1,11 @@
 # guardrails.toml — Code guardrail configuration
-# Docs: https://github.com/your-org/guardrails
+# Docs: https://github.com/AstroGuard/guardrails
 
 [guardrails]
 name = "my-project"
 
 # Files to include in scanning (default: everything)
-include = ["src/**/*", "lib/**/*", "app/**/*"]
+include = ["src/**/*", "app/**/*", "components/**/*"]
 
 # Files to exclude (defaults shown below are always applied)
 exclude = [
@@ -19,124 +19,9 @@ exclude = [
 ]
 
 
-# ──────────────────────────────────────────────
-# Banned Imports
-# Prevent usage of deprecated or unwanted packages
-# ──────────────────────────────────────────────
-
-[[rule]]
-id = "no-moment"
-type = "banned-import"
-severity = "error"
-packages = ["moment", "moment-timezone"]
-message = "moment.js is deprecated — use date-fns or Temporal API"
-suggest = "import { format } from 'date-fns'"
-
-[[rule]]
-id = "no-lodash-full"
-type = "banned-import"
-severity = "warning"
-packages = ["lodash"]
-message = "Import specific lodash functions instead of the full package"
-suggest = "import debounce from 'lodash/debounce'"
-
-[[rule]]
-id = "no-enzyme"
-type = "banned-import"
-severity = "error"
-packages = ["enzyme", "enzyme-adapter-react-16", "enzyme-adapter-react-17"]
-message = "Enzyme is deprecated — use @testing-library/react"
-
-
-# ──────────────────────────────────────────────
-# Banned Patterns
-# Prevent specific code patterns from appearing
-# ──────────────────────────────────────────────
-
-[[rule]]
-id = "no-console-log"
-type = "banned-pattern"
-severity = "warning"
-pattern = "console.log("
-glob = "src/**/*.ts"
-message = "Remove console.log before committing — use the logger instead"
-suggest = "import { logger } from '@company/logger'"
-
-# [[rule]]
-# id = "no-any-type"
-# type = "banned-pattern"
-# severity = "warning"
-# pattern = ": any"
-# regex = false
-# glob = "src/**/*.ts"
-# message = "Avoid using 'any' type — use proper typing or 'unknown'"
-
-
-# ──────────────────────────────────────────────
-# Required Patterns
-# Ensure certain patterns exist in matching files
-# ──────────────────────────────────────────────
-
-# [[rule]]
-# id = "error-boundary-in-pages"
-# type = "required-pattern"
-# severity = "error"
-# glob = "src/pages/**/*.tsx"
-# pattern = "ErrorBoundary"
-# message = "All page components must wrap content in an ErrorBoundary"
-
-
-# ──────────────────────────────────────────────
-# Banned Dependencies
-# Prevent packages from appearing in manifests
-# ──────────────────────────────────────────────
-
-[[rule]]
-id = "no-request-package"
-type = "banned-dependency"
-severity = "error"
-packages = ["request", "request-promise"]
-manifest = "package.json"
-message = "The 'request' package is deprecated — use 'node-fetch' or 'undici'"
-
-
-# ──────────────────────────────────────────────
-# File Presence
-# Ensure required project files exist
-# ──────────────────────────────────────────────
-
-# [[rule]]
-# id = "has-readme"
-# type = "file-presence"
-# severity = "warning"
-# required_files = ["README.md", "LICENSE"]
-# message = "Projects must have a README.md and LICENSE file"
-
-# [[rule]]
-# id = "no-env-file"
-# type = "file-presence"
-# severity = "error"
-# forbidden_files = [".env", ".env.local"]
-# message = ".env files should not be committed — use .env.example instead"
-
-
-# ──────────────────────────────────────────────
-# Ratchet Rules
-# Enforce decreasing counts of legacy patterns over time.
-# Use `guardrails count <pattern>` to find current count,
-# then set max_count and decrease it as you refactor.
-# ──────────────────────────────────────────────
-
-# [[rule]]
-# id = "ratchet-legacy-fetch"
-# type = "ratchet"
-# severity = "error"
-# pattern = "legacyFetch("
-# max_count = 47
-# glob = "src/**/*.ts"
-# message = "Migrate remaining legacyFetch calls to apiFetch"
-# suggest = "import { apiFetch } from '@company/http'"
-
+# ══════════════════════════════════════════════
+# TAILWIND + SHADCN RULES
+# ══════════════════════════════════════════════
 
 # ──────────────────────────────────────────────
 # Tailwind Dark Mode Enforcement
@@ -176,3 +61,134 @@ message = "The 'request' package is deprecated — use 'node-fetch' or 'undici'"
 # token_map = ["bg-indigo-600=bg-brand", "text-indigo-50=text-brand-foreground"]
 # # Allow specific raw colors that are intentionally unthemed:
 # allowed_classes = ["bg-green-500"]
+
+
+# ══════════════════════════════════════════════
+# MIGRATION RULES
+# Enforce a clean migration to Tailwind by banning
+# conflicting patterns, imports, and dependencies.
+# ══════════════════════════════════════════════
+
+# ──────────────────────────────────────────────
+# Banned Patterns
+# Prevent specific code patterns from appearing
+# ──────────────────────────────────────────────
+
+[[rule]]
+id = "no-inline-styles"
+type = "banned-pattern"
+severity = "warning"
+pattern = "style={{"
+glob = "**/*.{tsx,jsx}"
+message = "Avoid inline styles — use Tailwind utility classes instead"
+suggest = "Replace style={{ ... }} with Tailwind classes"
+
+# [[rule]]
+# id = "no-console-log"
+# type = "banned-pattern"
+# severity = "warning"
+# pattern = "console.log("
+# glob = "src/**/*.{ts,tsx}"
+# message = "Remove console.log before committing — use the logger instead"
+# suggest = "import { logger } from '@company/logger'"
+
+# [[rule]]
+# id = "no-ts-ignore"
+# type = "banned-pattern"
+# severity = "warning"
+# pattern = "@ts-ignore"
+# regex = false
+# glob = "src/**/*.{ts,tsx}"
+# message = "Use @ts-expect-error instead of @ts-ignore"
+
+
+# ──────────────────────────────────────────────
+# Banned Imports
+# Prevent usage of deprecated or unwanted packages
+# ──────────────────────────────────────────────
+
+[[rule]]
+id = "no-css-in-js"
+type = "banned-import"
+severity = "error"
+packages = ["styled-components", "@emotion/styled", "@emotion/css", "@emotion/react"]
+message = "CSS-in-JS libraries conflict with Tailwind — use utility classes instead"
+
+# [[rule]]
+# id = "no-moment"
+# type = "banned-import"
+# severity = "error"
+# packages = ["moment", "moment-timezone"]
+# message = "moment.js is deprecated — use date-fns or Temporal API"
+# suggest = "import { format } from 'date-fns'"
+
+
+# ──────────────────────────────────────────────
+# Banned Dependencies
+# Prevent packages from appearing in manifests
+# ──────────────────────────────────────────────
+
+[[rule]]
+id = "no-competing-frameworks"
+type = "banned-dependency"
+severity = "error"
+packages = ["bootstrap", "bulma", "@mui/material", "antd"]
+message = "Competing CSS framework detected — this project uses Tailwind"
+
+# [[rule]]
+# id = "no-request-package"
+# type = "banned-dependency"
+# severity = "error"
+# packages = ["request", "request-promise"]
+# manifest = "package.json"
+# message = "The 'request' package is deprecated — use 'node-fetch' or 'undici'"
+
+
+# ══════════════════════════════════════════════
+# COMING IN v2
+# These rule types are planned but not yet implemented.
+# ══════════════════════════════════════════════
+
+# ──────────────────────────────────────────────
+# Ratchet Rules
+# Enforce decreasing counts of legacy patterns over time.
+# Use `guardrails baseline` to find current count,
+# then set max_count and decrease it as you refactor.
+# ──────────────────────────────────────────────
+
+# [[rule]]
+# id = "ratchet-legacy-fetch"
+# type = "ratchet"
+# severity = "error"
+# pattern = "legacyFetch("
+# max_count = 47
+# glob = "src/**/*.ts"
+# message = "Migrate remaining legacyFetch calls to apiFetch"
+# suggest = "import { apiFetch } from '@company/http'"
+
+
+# ──────────────────────────────────────────────
+# Required Patterns
+# Ensure certain patterns exist in matching files
+# ──────────────────────────────────────────────
+
+# [[rule]]
+# id = "error-boundary-in-pages"
+# type = "required-pattern"
+# severity = "error"
+# glob = "src/pages/**/*.tsx"
+# pattern = "ErrorBoundary"
+# message = "All page components must wrap content in an ErrorBoundary"
+
+
+# ──────────────────────────────────────────────
+# File Presence
+# Ensure required project files exist
+# ──────────────────────────────────────────────
+
+# [[rule]]
+# id = "has-readme"
+# type = "file-presence"
+# severity = "warning"
+# required_files = ["README.md", "LICENSE"]
+# message = "Projects must have a README.md and LICENSE file"
