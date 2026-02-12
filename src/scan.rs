@@ -113,13 +113,9 @@ fn build_rules(resolved_rules: &[TomlRule]) -> Result<BuiltRules, ScanError> {
             }
         }
 
-        // Build per-rule inclusion glob
+        // Build per-rule inclusion glob (with brace expansion)
         let inclusion_glob = if let Some(ref pattern) = rule.file_glob() {
-            let gs = GlobSetBuilder::new()
-                .add(Glob::new(pattern).map_err(ScanError::GlobParse)?)
-                .build()
-                .map_err(ScanError::GlobParse)?;
-            Some(gs)
+            Some(build_glob_set_from_pattern(pattern)?)
         } else {
             None
         };
@@ -441,11 +437,7 @@ pub fn run_baseline(
         let pattern = toml_rule.pattern.clone().unwrap_or_default();
 
         let rule_glob = if let Some(ref pat) = rule.file_glob() {
-            let gs = GlobSetBuilder::new()
-                .add(Glob::new(pat).map_err(ScanError::GlobParse)?)
-                .build()
-                .map_err(ScanError::GlobParse)?;
-            Some(gs)
+            Some(build_glob_set_from_pattern(pat)?)
         } else {
             None
         };
@@ -557,10 +549,63 @@ fn collect_files(target_paths: &[PathBuf], exclude_set: &GlobSet) -> Vec<PathBuf
     files
 }
 
+/// Normalize a glob pattern:
+/// 1. Expand brace syntax (`{a,b}`) into multiple patterns (globset doesn't support it).
+/// 2. Auto-prefix path-based globs with `**/` so they match against absolute paths.
+///    e.g. `apps/web/src/**/*.tsx` → `**/apps/web/src/**/*.tsx`
+fn expand_glob(pattern: &str) -> Vec<String> {
+    // First, expand brace syntax
+    if let Some(open) = pattern.find('{') {
+        if let Some(close) = pattern[open..].find('}') {
+            let close = open + close;
+            let prefix = &pattern[..open];
+            let suffix = &pattern[close + 1..];
+            let alternatives = &pattern[open + 1..close];
+
+            // Only expand if there are commas (otherwise it's a glob char class)
+            if alternatives.contains(',') {
+                let mut result = Vec::new();
+                for alt in alternatives.split(',') {
+                    let expanded = format!("{prefix}{alt}{suffix}");
+                    // Recursively expand in case there are nested braces
+                    result.extend(expand_glob(&expanded));
+                }
+                return result;
+            }
+        }
+    }
+
+    // Auto-prefix path-based globs that don't already start with ** or /
+    // e.g. "apps/web/src/**/*.tsx" → "**/apps/web/src/**/*.tsx"
+    // This ensures they match against absolute file paths.
+    let normalized = if pattern.contains('/')
+        && !pattern.starts_with("**/")
+        && !pattern.starts_with('/')
+    {
+        format!("**/{pattern}")
+    } else {
+        pattern.to_string()
+    };
+
+    vec![normalized]
+}
+
+/// Build a GlobSet from a single pattern string, expanding brace syntax.
+fn build_glob_set_from_pattern(pattern: &str) -> Result<GlobSet, ScanError> {
+    let expanded = expand_glob(pattern);
+    let mut builder = GlobSetBuilder::new();
+    for pat in &expanded {
+        builder.add(Glob::new(pat).map_err(ScanError::GlobParse)?);
+    }
+    builder.build().map_err(ScanError::GlobParse)
+}
+
 fn build_glob_set(patterns: &[String]) -> Result<GlobSet, ScanError> {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
-        builder.add(Glob::new(pattern).map_err(ScanError::GlobParse)?);
+        for pat in &expand_glob(pattern) {
+            builder.add(Glob::new(pat).map_err(ScanError::GlobParse)?);
+        }
     }
     builder.build().map_err(ScanError::GlobParse)
 }
@@ -1106,6 +1151,94 @@ mod tests {
     fn build_glob_set_invalid_pattern() {
         let err = build_glob_set(&["[invalid".into()]).unwrap_err();
         assert!(matches!(err, ScanError::GlobParse(_)));
+    }
+
+    // ── expand_glob / brace expansion tests ──
+
+    #[test]
+    fn expand_glob_no_braces() {
+        assert_eq!(expand_glob("**/*.ts"), vec!["**/*.ts"]);
+    }
+
+    #[test]
+    fn expand_glob_single_brace() {
+        let mut result = expand_glob("**/*.{ts,tsx}");
+        result.sort();
+        assert_eq!(result, vec!["**/*.ts", "**/*.tsx"]);
+    }
+
+    #[test]
+    fn expand_glob_three_alternatives() {
+        let mut result = expand_glob("src/**/*.{ts,tsx,js}");
+        result.sort();
+        // Path-based globs get **/ prefix
+        assert_eq!(
+            result,
+            vec!["**/src/**/*.js", "**/src/**/*.ts", "**/src/**/*.tsx"]
+        );
+    }
+
+    #[test]
+    fn expand_glob_no_comma_passthrough() {
+        // Braces without commas should pass through (e.g. character classes)
+        assert_eq!(expand_glob("**/*.[tj]s"), vec!["**/*.[tj]s"]);
+    }
+
+    #[test]
+    fn expand_glob_auto_prefix_path_glob() {
+        // Path-based globs without **/ prefix get auto-prefixed
+        assert_eq!(
+            expand_glob("apps/web/src/**/*.tsx"),
+            vec!["**/apps/web/src/**/*.tsx"]
+        );
+    }
+
+    #[test]
+    fn expand_glob_no_double_prefix() {
+        // Already prefixed with **/ should not get double-prefixed
+        assert_eq!(
+            expand_glob("**/apps/web/src/**/*.tsx"),
+            vec!["**/apps/web/src/**/*.tsx"]
+        );
+    }
+
+    #[test]
+    fn expand_glob_simple_extension_no_prefix() {
+        // Simple extension globs (no /) should not get prefixed
+        assert_eq!(expand_glob("*.ts"), vec!["*.ts"]);
+    }
+
+    #[test]
+    fn build_glob_set_brace_expansion() {
+        let gs = build_glob_set(&["**/*.{ts,tsx}".into()]).unwrap();
+        assert!(gs.is_match("src/foo.ts"));
+        assert!(gs.is_match("src/foo.tsx"));
+        assert!(!gs.is_match("src/foo.js"));
+    }
+
+    #[test]
+    fn build_glob_set_from_pattern_brace_expansion() {
+        let gs = build_glob_set_from_pattern("**/*.{ts,tsx,js,jsx}").unwrap();
+        assert!(gs.is_match("src/components/Button.tsx"));
+        assert!(gs.is_match("lib/utils.js"));
+        assert!(!gs.is_match("src/main.rs"));
+    }
+
+    #[test]
+    fn build_glob_set_from_pattern_path_glob() {
+        let gs = build_glob_set_from_pattern("src/components/**/*.{ts,tsx}").unwrap();
+        assert!(gs.is_match("src/components/Button.tsx"));
+        assert!(gs.is_match("src/components/deep/nested/Card.ts"));
+        assert!(!gs.is_match("lib/utils.tsx"));
+    }
+
+    #[test]
+    fn build_glob_set_path_glob_matches_absolute() {
+        // The real-world case: "apps/web/src/**/*.{ts,tsx}" must match absolute paths
+        let gs = build_glob_set_from_pattern("apps/web/src/**/*.{ts,tsx}").unwrap();
+        assert!(gs.is_match("/Users/dev/project/apps/web/src/components/Foo.tsx"));
+        assert!(gs.is_match("apps/web/src/index.ts"));
+        assert!(!gs.is_match("/Users/dev/project/apps/api/src/index.ts"));
     }
 
     // ── run_scan integration tests ──
