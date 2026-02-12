@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/guardrails.png" alt="Guardrails logo" width="300" />
+</p>
+
 # guardrails
 
 Stop AI from undoing your team's decisions.
