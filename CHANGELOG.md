@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.3.5] - 2026-02-12
+
+### Bug Fixes
+- chmod binary executable at runtime if npm strips permissions (62a5c72)
+
 ## [v0.3.4] - 2026-02-12
 
 ### Bug Fixes

@@ -1,6 +1,6 @@
 {
   "name": "code-guardrails-darwin-arm64",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Guardrails CLI binary for macOS ARM64",
   "license": "MIT",
   "repository": {
