@@ -1,6 +1,6 @@
 [package]
 name = "guardrails"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Enforce architectural decisions AI coding tools keep ignoring"
 license = "MIT"
