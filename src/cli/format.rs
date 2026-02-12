@@ -9,12 +9,18 @@ use std::path::Path;
 
 /// Print violations grouped by file with ANSI colors.
 pub fn print_pretty(result: &ScanResult) {
+    let mut out = std::io::stdout();
+    write_pretty(result, &mut out);
+}
+
+fn write_pretty(result: &ScanResult, out: &mut dyn Write) {
     if result.violations.is_empty() {
-        println!(
+        let _ = writeln!(
+            out,
             "\x1b[32m✓\x1b[0m No violations found ({} files scanned, {} rules loaded)",
             result.files_scanned, result.rules_loaded
         );
-        print_ratchet_summary(&result.ratchet_counts);
+        write_ratchet_summary_pretty(&result.ratchet_counts, out);
         return;
     }
 
@@ -28,7 +34,7 @@ pub fn print_pretty(result: &ScanResult) {
     }
 
     for (file, violations) in &by_file {
-        println!("\n\x1b[4m{}\x1b[0m", file);
+        let _ = writeln!(out, "\n\x1b[4m{}\x1b[0m", file);
         for v in violations {
             let severity_str = match v.severity {
                 Severity::Error => "\x1b[31merror\x1b[0m",
@@ -41,17 +47,18 @@ pub fn print_pretty(result: &ScanResult) {
                 _ => "1:1".to_string(),
             };
 
-            println!(
+            let _ = writeln!(
+                out,
                 "  \x1b[90m{:<8}\x1b[0m {} \x1b[90m{:<25}\x1b[0m {}",
                 location, severity_str, v.rule_id, v.message
             );
 
             if let Some(ref source) = v.source_line {
-                println!("           \x1b[90m│\x1b[0m {}", source.trim());
+                let _ = writeln!(out, "           \x1b[90m│\x1b[0m {}", source.trim());
             }
 
             if let Some(ref suggest) = v.suggest {
-                println!("           \x1b[90m└─\x1b[0m \x1b[36m{}\x1b[0m", suggest);
+                let _ = writeln!(out, "           \x1b[90m└─\x1b[0m \x1b[36m{}\x1b[0m", suggest);
             }
         }
     }
@@ -67,31 +74,35 @@ pub fn print_pretty(result: &ScanResult) {
         .filter(|v| v.severity == Severity::Warning)
         .count();
 
-    println!();
-    print!("\x1b[1m");
+    let _ = writeln!(out);
+    let _ = write!(out, "\x1b[1m");
     if errors > 0 {
-        print!("\x1b[31m{} error{}\x1b[0m\x1b[1m", errors, if errors == 1 { "" } else { "s" });
+        let _ = write!(out, "\x1b[31m{} error{}\x1b[0m\x1b[1m", errors, if errors == 1 { "" } else { "s" });
     }
     if errors > 0 && warnings > 0 {
-        print!(", ");
+        let _ = write!(out, ", ");
     }
     if warnings > 0 {
-        print!("\x1b[33m{} warning{}\x1b[0m\x1b[1m", warnings, if warnings == 1 { "" } else { "s" });
+        let _ = write!(out, "\x1b[33m{} warning{}\x1b[0m\x1b[1m", warnings, if warnings == 1 { "" } else { "s" });
     }
-    println!(
+    let _ = writeln!(
+        out,
         " ({} files scanned, {} rules loaded)\x1b[0m",
         result.files_scanned, result.rules_loaded
     );
 
-    print_ratchet_summary(&result.ratchet_counts);
+    write_ratchet_summary_pretty(&result.ratchet_counts, out);
 }
 
-fn print_ratchet_summary(ratchet_counts: &HashMap<String, (usize, usize)>) {
+fn write_ratchet_summary_pretty(
+    ratchet_counts: &HashMap<String, (usize, usize)>,
+    out: &mut dyn Write,
+) {
     if ratchet_counts.is_empty() {
         return;
     }
 
-    println!("\n\x1b[1mRatchet rules:\x1b[0m");
+    let _ = writeln!(out, "\n\x1b[1mRatchet rules:\x1b[0m");
     let mut sorted: Vec<_> = ratchet_counts.iter().collect();
     sorted.sort_by_key(|(id, _)| (*id).clone());
 
@@ -101,12 +112,17 @@ fn print_ratchet_summary(ratchet_counts: &HashMap<String, (usize, usize)>) {
         } else {
             format!("\x1b[31m✗ OVER\x1b[0m ({}/{})", found, max)
         };
-        println!("  {:<30} {}", rule_id, status);
+        let _ = writeln!(out, "  {:<30} {}", rule_id, status);
     }
 }
 
 /// Print violations as structured JSON.
 pub fn print_json(result: &ScanResult) {
+    let mut out = std::io::stdout();
+    write_json(result, &mut out);
+}
+
+fn write_json(result: &ScanResult, out: &mut dyn Write) {
     let violations: Vec<_> = result
         .violations
         .iter()
@@ -154,7 +170,7 @@ pub fn print_json(result: &ScanResult) {
         "ratchet": ratchet,
     });
 
-    println!("{}", serde_json::to_string_pretty(&output).unwrap());
+    let _ = writeln!(out, "{}", serde_json::to_string_pretty(&output).unwrap());
 }
 
 /// Print violations in compact one-line-per-violation format.
@@ -295,6 +311,11 @@ fn write_ratchet_stderr(
 
 /// Print violations in SARIF v2.1.0 format for GitHub Code Scanning.
 pub fn print_sarif(result: &ScanResult) {
+    let mut out = std::io::stdout();
+    write_sarif(result, &mut out);
+}
+
+fn write_sarif(result: &ScanResult, out: &mut dyn Write) {
     // Collect unique rules
     let mut rule_ids: Vec<String> = result
         .violations
@@ -389,7 +410,7 @@ pub fn print_sarif(result: &ScanResult) {
         }]
     });
 
-    println!("{}", serde_json::to_string_pretty(&sarif).unwrap());
+    let _ = writeln!(out, "{}", serde_json::to_string_pretty(&sarif).unwrap());
 }
 
 /// Print violations as a Markdown report (for GitHub PR summaries).
@@ -772,5 +793,999 @@ mod tests {
 
         let stdout = String::from_utf8(out).unwrap();
         assert!(stdout.is_empty());
+    }
+
+    // ── write_markdown tests ──
+
+    #[test]
+    fn markdown_no_violations() {
+        let result = make_result(vec![]);
+        let mut out = Vec::new();
+        write_markdown(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("## Guardrails Report"));
+        assert!(output.contains("No violations found"));
+        assert!(output.contains("5 files scanned"));
+    }
+
+    #[test]
+    fn markdown_errors_and_warnings() {
+        let result = make_result(vec![
+            make_violation("src/a.tsx", 10, 5, Severity::Error, "dark-mode", "missing dark variant"),
+            make_violation("src/a.tsx", 20, 1, Severity::Warning, "theme-tokens", "raw color"),
+            make_violation("src/b.tsx", 3, 1, Severity::Error, "dark-mode", "missing dark variant"),
+        ]);
+        let mut out = Vec::new();
+        write_markdown(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("## Guardrails Report"));
+        assert!(output.contains("2 errors, 1 warning"));
+        assert!(output.contains("### Errors"));
+        assert!(output.contains("### Warnings"));
+        assert!(output.contains("`src/a.tsx`"));
+        assert!(output.contains("`src/b.tsx`"));
+        assert!(output.contains("| Line | Rule | Message | Suggestion |"));
+    }
+
+    #[test]
+    fn markdown_with_ratchet() {
+        let mut result = make_result(vec![]);
+        result
+            .ratchet_counts
+            .insert("legacy-api".to_string(), (3, 5));
+        result
+            .ratchet_counts
+            .insert("old-pattern".to_string(), (10, 5));
+        let mut out = Vec::new();
+        write_markdown(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("### Ratchet Rules"));
+        assert!(output.contains("| Rule | Status | Count |"));
+        assert!(output.contains("`legacy-api`"));
+        assert!(output.contains("pass"));
+        assert!(output.contains("`old-pattern`"));
+        assert!(output.contains("OVER"));
+    }
+
+    #[test]
+    fn markdown_with_changed_only_context() {
+        let mut result = make_result(vec![
+            make_violation("src/a.tsx", 1, 1, Severity::Error, "r1", "msg"),
+        ]);
+        result.changed_files_count = Some(3);
+        result.base_ref = Some("main".into());
+        let mut out = Vec::new();
+        write_markdown(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("Scanned 3 changed files against `main`"));
+    }
+
+    #[test]
+    fn markdown_single_changed_file() {
+        let mut result = make_result(vec![]);
+        result.changed_files_count = Some(1);
+        result.base_ref = Some("develop".into());
+        let mut out = Vec::new();
+        write_markdown(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("Scanned 1 changed file against `develop`"));
+    }
+
+    #[test]
+    fn markdown_violation_with_suggestion() {
+        let mut v = make_violation("src/a.tsx", 5, 1, Severity::Warning, "theme-tokens", "raw color");
+        v.suggest = Some("Use bg-background instead".into());
+        let result = make_result(vec![v]);
+        let mut out = Vec::new();
+        write_markdown(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("Use bg-background instead"));
+    }
+
+    #[test]
+    fn markdown_violation_no_line_number() {
+        let v = Violation {
+            rule_id: "has-readme".into(),
+            severity: Severity::Error,
+            file: PathBuf::from("project"),
+            line: None,
+            column: None,
+            message: "README.md missing".into(),
+            suggest: None,
+            source_line: None,
+            fix: None,
+        };
+        let result = make_result(vec![v]);
+        let mut out = Vec::new();
+        write_markdown(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        // No line number should show "-"
+        assert!(output.contains("| - |"));
+    }
+
+    // ── write_summary_stderr tests ──
+
+    #[test]
+    fn summary_stderr_errors_only() {
+        let result = make_result(vec![
+            make_violation("a.ts", 1, 1, Severity::Error, "r1", "e1"),
+            make_violation("a.ts", 2, 1, Severity::Error, "r2", "e2"),
+        ]);
+        let mut err = Vec::new();
+        write_summary_stderr(&result, &mut err);
+
+        let stderr = String::from_utf8(err).unwrap();
+        assert!(stderr.contains("2 errors"));
+        assert!(!stderr.contains("warning"));
+    }
+
+    #[test]
+    fn summary_stderr_warnings_only() {
+        let result = make_result(vec![
+            make_violation("a.ts", 1, 1, Severity::Warning, "r1", "w1"),
+        ]);
+        let mut err = Vec::new();
+        write_summary_stderr(&result, &mut err);
+
+        let stderr = String::from_utf8(err).unwrap();
+        assert!(stderr.contains("1 warning"));
+        assert!(!stderr.contains("error"));
+    }
+
+    #[test]
+    fn summary_stderr_plural_errors_and_warnings() {
+        let result = make_result(vec![
+            make_violation("a.ts", 1, 1, Severity::Error, "r1", "e1"),
+            make_violation("a.ts", 2, 1, Severity::Error, "r2", "e2"),
+            make_violation("a.ts", 3, 1, Severity::Warning, "r3", "w1"),
+            make_violation("a.ts", 4, 1, Severity::Warning, "r4", "w2"),
+            make_violation("a.ts", 5, 1, Severity::Warning, "r5", "w3"),
+        ]);
+        let mut err = Vec::new();
+        write_summary_stderr(&result, &mut err);
+
+        let stderr = String::from_utf8(err).unwrap();
+        assert!(stderr.contains("2 errors"));
+        assert!(stderr.contains("3 warnings"));
+    }
+
+    #[test]
+    fn summary_stderr_no_violations() {
+        let result = make_result(vec![]);
+        let mut err = Vec::new();
+        write_summary_stderr(&result, &mut err);
+
+        let stderr = String::from_utf8(err).unwrap();
+        assert!(stderr.contains("No violations found"));
+    }
+
+    // ── write_ratchet_stderr tests ──
+
+    #[test]
+    fn ratchet_stderr_empty() {
+        let counts = HashMap::new();
+        let mut err = Vec::new();
+        write_ratchet_stderr(&counts, &mut err);
+
+        let stderr = String::from_utf8(err).unwrap();
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn ratchet_stderr_pass_and_over() {
+        let mut counts = HashMap::new();
+        counts.insert("a-rule".to_string(), (2usize, 5usize));
+        counts.insert("b-rule".to_string(), (10, 3));
+        let mut err = Vec::new();
+        write_ratchet_stderr(&counts, &mut err);
+
+        let stderr = String::from_utf8(err).unwrap();
+        assert!(stderr.contains("ratchet: a-rule pass (2/5)"));
+        assert!(stderr.contains("ratchet: b-rule OVER (10/3)"));
+    }
+
+    // ── compact with missing line/column ──
+
+    #[test]
+    fn compact_missing_line_defaults_to_1() {
+        let v = Violation {
+            rule_id: "test".to_string(),
+            severity: Severity::Error,
+            file: PathBuf::from("a.ts"),
+            line: None,
+            column: None,
+            message: "msg".to_string(),
+            suggest: None,
+            source_line: None,
+            fix: None,
+        };
+        let result = make_result(vec![v]);
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        write_compact(&result, &mut out, &mut err);
+
+        let stdout = String::from_utf8(out).unwrap();
+        assert!(stdout.contains("a.ts:1:1: error[test] msg"));
+    }
+
+    // ── github with missing line ──
+
+    #[test]
+    fn github_missing_line_defaults_to_1() {
+        let v = Violation {
+            rule_id: "test".to_string(),
+            severity: Severity::Warning,
+            file: PathBuf::from("b.ts"),
+            line: None,
+            column: None,
+            message: "msg".to_string(),
+            suggest: None,
+            source_line: None,
+            fix: None,
+        };
+        let result = make_result(vec![v]);
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        write_github(&result, &mut out, &mut err);
+
+        let stdout = String::from_utf8(out).unwrap();
+        assert!(stdout.contains("line=1"));
+        assert!(!stdout.contains("col="));
+    }
+
+    // ── apply_fixes tests ──
+
+    #[test]
+    fn apply_fixes_line_targeted() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.tsx");
+        std::fs::write(&file, "let a = bg-white;\nlet b = bg-white;\n").unwrap();
+
+        let result = ScanResult {
+            violations: vec![Violation {
+                rule_id: "theme".into(),
+                severity: Severity::Warning,
+                file: file.clone(),
+                line: Some(1),
+                column: Some(9),
+                message: "raw color".into(),
+                suggest: Some("Use bg-background".into()),
+                source_line: None,
+                fix: Some(crate::rules::Fix {
+                    old: "bg-white".into(),
+                    new: "bg-background".into(),
+                }),
+            }],
+            files_scanned: 1,
+            rules_loaded: 1,
+            ratchet_counts: HashMap::new(),
+            changed_files_count: None,
+            base_ref: None,
+        };
+
+        let count = apply_fixes(&result, false);
+        assert_eq!(count, 1);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        // Only line 1 should be fixed
+        assert!(content.starts_with("let a = bg-background;"));
+        assert!(content.contains("let b = bg-white;"));
+    }
+
+    #[test]
+    fn apply_fixes_no_line_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.tsx");
+        std::fs::write(&file, "bg-white is used here\n").unwrap();
+
+        let result = ScanResult {
+            violations: vec![Violation {
+                rule_id: "theme".into(),
+                severity: Severity::Warning,
+                file: file.clone(),
+                line: None,
+                column: None,
+                message: "raw color".into(),
+                suggest: None,
+                source_line: None,
+                fix: Some(crate::rules::Fix {
+                    old: "bg-white".into(),
+                    new: "bg-background".into(),
+                }),
+            }],
+            files_scanned: 1,
+            rules_loaded: 1,
+            ratchet_counts: HashMap::new(),
+            changed_files_count: None,
+            base_ref: None,
+        };
+
+        let count = apply_fixes(&result, false);
+        assert_eq!(count, 1);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert!(content.contains("bg-background"));
+    }
+
+    #[test]
+    fn apply_fixes_dry_run_no_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.tsx");
+        std::fs::write(&file, "bg-white\n").unwrap();
+
+        let result = ScanResult {
+            violations: vec![Violation {
+                rule_id: "theme".into(),
+                severity: Severity::Warning,
+                file: file.clone(),
+                line: Some(1),
+                column: Some(1),
+                message: "raw color".into(),
+                suggest: None,
+                source_line: None,
+                fix: Some(crate::rules::Fix {
+                    old: "bg-white".into(),
+                    new: "bg-background".into(),
+                }),
+            }],
+            files_scanned: 1,
+            rules_loaded: 1,
+            ratchet_counts: HashMap::new(),
+            changed_files_count: None,
+            base_ref: None,
+        };
+
+        let count = apply_fixes(&result, true);
+        assert_eq!(count, 1);
+
+        // File should not be modified
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert!(content.contains("bg-white"));
+    }
+
+    #[test]
+    fn apply_fixes_no_fixable_violations() {
+        let result = make_result(vec![
+            make_violation("a.ts", 1, 1, Severity::Error, "r1", "msg"),
+        ]);
+        let count = apply_fixes(&result, false);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn apply_fixes_preserves_trailing_newline() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.tsx");
+        std::fs::write(&file, "bg-white\n").unwrap();
+
+        let result = ScanResult {
+            violations: vec![Violation {
+                rule_id: "theme".into(),
+                severity: Severity::Warning,
+                file: file.clone(),
+                line: Some(1),
+                column: Some(1),
+                message: "raw color".into(),
+                suggest: None,
+                source_line: None,
+                fix: Some(crate::rules::Fix {
+                    old: "bg-white".into(),
+                    new: "bg-background".into(),
+                }),
+            }],
+            files_scanned: 1,
+            rules_loaded: 1,
+            ratchet_counts: HashMap::new(),
+            changed_files_count: None,
+            base_ref: None,
+        };
+
+        apply_fixes(&result, false);
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert!(content.ends_with('\n'));
+    }
+
+    #[test]
+    fn apply_fixes_nonexistent_file_skipped() {
+        let result = ScanResult {
+            violations: vec![Violation {
+                rule_id: "theme".into(),
+                severity: Severity::Warning,
+                file: PathBuf::from("/nonexistent/file.tsx"),
+                line: Some(1),
+                column: Some(1),
+                message: "msg".into(),
+                suggest: None,
+                source_line: None,
+                fix: Some(crate::rules::Fix {
+                    old: "old".into(),
+                    new: "new".into(),
+                }),
+            }],
+            files_scanned: 1,
+            rules_loaded: 1,
+            ratchet_counts: HashMap::new(),
+            changed_files_count: None,
+            base_ref: None,
+        };
+
+        let count = apply_fixes(&result, false);
+        assert_eq!(count, 0);
+    }
+
+    // ── write_json tests ──
+
+    #[test]
+    fn json_with_violations_and_ratchet() {
+        let mut v = make_violation("src/a.tsx", 10, 5, Severity::Error, "dark-mode", "missing dark");
+        v.suggest = Some("add dark variant".into());
+        v.source_line = Some("  <div className=\"bg-white\">".into());
+        v.fix = Some(crate::rules::Fix {
+            old: "bg-white".into(),
+            new: "bg-background".into(),
+        });
+
+        let mut result = make_result(vec![v]);
+        result.ratchet_counts.insert("legacy".into(), (2, 5));
+
+        let mut out = Vec::new();
+        write_json(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["summary"]["total"], 1);
+        assert_eq!(parsed["summary"]["errors"], 1);
+        assert_eq!(parsed["summary"]["warnings"], 0);
+        assert_eq!(parsed["summary"]["files_scanned"], 5);
+        assert_eq!(parsed["summary"]["rules_loaded"], 2);
+        assert_eq!(parsed["violations"][0]["rule_id"], "dark-mode");
+        assert_eq!(parsed["violations"][0]["severity"], "error");
+        assert_eq!(parsed["violations"][0]["suggest"], "add dark variant");
+        assert_eq!(parsed["violations"][0]["fix"]["old"], "bg-white");
+        assert_eq!(parsed["violations"][0]["fix"]["new"], "bg-background");
+        assert!(parsed["ratchet"]["legacy"]["pass"].as_bool().unwrap());
+        assert_eq!(parsed["ratchet"]["legacy"]["found"], 2);
+        assert_eq!(parsed["ratchet"]["legacy"]["max"], 5);
+    }
+
+    #[test]
+    fn json_empty_violations() {
+        let result = make_result(vec![]);
+        let mut out = Vec::new();
+        write_json(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["summary"]["total"], 0);
+        assert!(parsed["violations"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn json_warning_severity() {
+        let result = make_result(vec![
+            make_violation("a.ts", 1, 1, Severity::Warning, "r1", "warn msg"),
+        ]);
+        let mut out = Vec::new();
+        write_json(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["violations"][0]["severity"], "warning");
+        assert_eq!(parsed["summary"]["warnings"], 1);
+    }
+
+    #[test]
+    fn json_violation_without_fix() {
+        let result = make_result(vec![
+            make_violation("a.ts", 1, 1, Severity::Error, "r1", "msg"),
+        ]);
+        let mut out = Vec::new();
+        write_json(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        assert!(parsed["violations"][0]["fix"].is_null());
+    }
+
+    // ── write_sarif tests ──
+
+    #[test]
+    fn sarif_full_output() {
+        let mut v = make_violation("src/a.tsx", 10, 5, Severity::Error, "dark-mode", "missing dark");
+        v.fix = Some(crate::rules::Fix {
+            old: "bg-white".into(),
+            new: "bg-background".into(),
+        });
+        v.suggest = Some("Use bg-background".into());
+
+        let result = make_result(vec![
+            v,
+            make_violation("src/b.tsx", 3, 1, Severity::Warning, "theme-tokens", "raw color"),
+        ]);
+
+        let mut out = Vec::new();
+        write_sarif(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["version"], "2.1.0");
+        assert_eq!(parsed["runs"][0]["tool"]["driver"]["name"], "guardrails");
+
+        // Rules should be sorted and deduplicated
+        let rules = parsed["runs"][0]["tool"]["driver"]["rules"].as_array().unwrap();
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0]["id"], "dark-mode");
+        assert_eq!(rules[1]["id"], "theme-tokens");
+
+        // Results should have all violations
+        let results = parsed["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0]["level"], "error");
+        assert_eq!(results[1]["level"], "warning");
+
+        // First result should have fix
+        assert!(results[0]["fixes"].is_array());
+        assert_eq!(results[0]["fixes"][0]["artifactChanges"][0]["replacements"][0]["insertedContent"]["text"], "bg-background");
+        assert_eq!(results[0]["fixes"][0]["description"]["text"], "Use bg-background");
+
+        // Second result should not have fixes key set
+        assert!(results[1].get("fixes").is_none());
+    }
+
+    #[test]
+    fn sarif_empty_violations() {
+        let result = make_result(vec![]);
+        let mut out = Vec::new();
+        write_sarif(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        assert!(parsed["runs"][0]["results"].as_array().unwrap().is_empty());
+        assert!(parsed["runs"][0]["tool"]["driver"]["rules"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn sarif_fix_without_suggest_uses_default() {
+        let mut v = make_violation("a.tsx", 1, 1, Severity::Error, "r1", "msg");
+        v.fix = Some(crate::rules::Fix {
+            old: "old".into(),
+            new: "new".into(),
+        });
+        // v.suggest is None
+
+        let result = make_result(vec![v]);
+        let mut out = Vec::new();
+        write_sarif(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(
+            parsed["runs"][0]["results"][0]["fixes"][0]["description"]["text"],
+            "Apply fix"
+        );
+    }
+
+    #[test]
+    fn sarif_missing_line_col_defaults_to_1() {
+        let v = Violation {
+            rule_id: "r1".into(),
+            severity: Severity::Error,
+            file: PathBuf::from("a.tsx"),
+            line: None,
+            column: None,
+            message: "msg".into(),
+            suggest: None,
+            source_line: None,
+            fix: None,
+        };
+        let result = make_result(vec![v]);
+        let mut out = Vec::new();
+        write_sarif(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        let region = &parsed["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["region"];
+        assert_eq!(region["startLine"], 1);
+        assert_eq!(region["startColumn"], 1);
+    }
+
+    // ── compact with ratchet OVER ──
+
+    #[test]
+    fn compact_ratchet_over_on_stderr() {
+        let mut result = make_result(vec![]);
+        result
+            .ratchet_counts
+            .insert("legacy-api".to_string(), (10, 5));
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        write_compact(&result, &mut out, &mut err);
+
+        let stderr = String::from_utf8(err).unwrap();
+        assert!(stderr.contains("ratchet: legacy-api OVER (10/5)"));
+    }
+
+    // ── github with multiple violations ──
+
+    #[test]
+    fn github_multiple_violations() {
+        let result = make_result(vec![
+            make_violation("a.ts", 1, 1, Severity::Error, "r1", "e1"),
+            make_violation("b.ts", 5, 10, Severity::Warning, "r2", "w1"),
+        ]);
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        write_github(&result, &mut out, &mut err);
+
+        let stdout = String::from_utf8(out).unwrap();
+        assert!(stdout.contains("::error file=a.ts,line=1,col=1,title=r1::e1"));
+        assert!(stdout.contains("::warning file=b.ts,line=5,col=10,title=r2::w1"));
+
+        let stderr = String::from_utf8(err).unwrap();
+        assert!(stderr.contains("1 error, 1 warning"));
+    }
+
+    // ── markdown with only errors, no warnings ──
+
+    #[test]
+    fn markdown_errors_only() {
+        let result = make_result(vec![
+            make_violation("src/a.tsx", 1, 1, Severity::Error, "r1", "err"),
+        ]);
+        let mut out = Vec::new();
+        write_markdown(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("1 error"));
+        assert!(!output.contains("warning"));
+        assert!(output.contains("### Errors"));
+        assert!(!output.contains("### Warnings"));
+    }
+
+    // ── markdown with only warnings, no errors ──
+
+    #[test]
+    fn markdown_warnings_only() {
+        let result = make_result(vec![
+            make_violation("src/a.tsx", 1, 1, Severity::Warning, "r1", "warn"),
+        ]);
+        let mut out = Vec::new();
+        write_markdown(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("1 warning"));
+        assert!(!output.contains("error"));
+        assert!(!output.contains("### Errors"));
+        assert!(output.contains("### Warnings"));
+    }
+
+    // ── markdown ratchet only (no violations) ──
+
+    #[test]
+    fn markdown_ratchet_only_no_violations() {
+        let mut result = make_result(vec![]);
+        result.ratchet_counts.insert("r1".into(), (1, 5));
+        let mut out = Vec::new();
+        write_markdown(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("No violations found"));
+        assert!(output.contains("### Ratchet Rules"));
+    }
+
+    // ── summary stderr: singular error and warning ──
+
+    #[test]
+    fn summary_stderr_singular_counts() {
+        let result = make_result(vec![
+            make_violation("a.ts", 1, 1, Severity::Error, "r1", "e"),
+            make_violation("a.ts", 2, 1, Severity::Warning, "r2", "w"),
+        ]);
+        let mut err = Vec::new();
+        write_summary_stderr(&result, &mut err);
+
+        let stderr = String::from_utf8(err).unwrap();
+        // Should say "1 error" not "1 errors"
+        assert!(stderr.contains("1 error,"));
+        assert!(stderr.contains("1 warning"));
+        assert!(!stderr.contains("errors"));
+        assert!(!stderr.contains("warnings"));
+    }
+
+    // ── apply_fixes with multiple fixes in same file ──
+
+    #[test]
+    fn apply_fixes_multiple_in_same_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.tsx");
+        std::fs::write(&file, "bg-white text-gray-900\nbg-white text-gray-500\n").unwrap();
+
+        let result = ScanResult {
+            violations: vec![
+                Violation {
+                    rule_id: "theme".into(),
+                    severity: Severity::Warning,
+                    file: file.clone(),
+                    line: Some(1),
+                    column: Some(1),
+                    message: "raw color".into(),
+                    suggest: None,
+                    source_line: None,
+                    fix: Some(crate::rules::Fix {
+                        old: "bg-white".into(),
+                        new: "bg-background".into(),
+                    }),
+                },
+                Violation {
+                    rule_id: "theme".into(),
+                    severity: Severity::Warning,
+                    file: file.clone(),
+                    line: Some(2),
+                    column: Some(1),
+                    message: "raw color".into(),
+                    suggest: None,
+                    source_line: None,
+                    fix: Some(crate::rules::Fix {
+                        old: "bg-white".into(),
+                        new: "bg-background".into(),
+                    }),
+                },
+            ],
+            files_scanned: 1,
+            rules_loaded: 1,
+            ratchet_counts: HashMap::new(),
+            changed_files_count: None,
+            base_ref: None,
+        };
+
+        let count = apply_fixes(&result, false);
+        assert_eq!(count, 2);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert!(!content.contains("bg-white"));
+        assert_eq!(content.matches("bg-background").count(), 2);
+    }
+
+    // ── write_pretty tests ──
+
+    #[test]
+    fn pretty_no_violations() {
+        let result = make_result(vec![]);
+        let mut out = Vec::new();
+        write_pretty(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("No violations found"));
+        assert!(output.contains("5 files scanned"));
+        assert!(output.contains("2 rules loaded"));
+    }
+
+    #[test]
+    fn pretty_with_error_and_warning() {
+        let result = make_result(vec![
+            make_violation("src/a.tsx", 10, 5, Severity::Error, "dark-mode", "missing dark variant"),
+            make_violation("src/a.tsx", 20, 1, Severity::Warning, "theme-tokens", "raw color"),
+        ]);
+        let mut out = Vec::new();
+        write_pretty(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("src/a.tsx"));
+        assert!(output.contains("10:5"));
+        assert!(output.contains("20:1"));
+        assert!(output.contains("error"));
+        assert!(output.contains("warn"));
+        assert!(output.contains("1 error"));
+        assert!(output.contains("1 warning"));
+    }
+
+    #[test]
+    fn pretty_errors_only_no_warning_count() {
+        let result = make_result(vec![
+            make_violation("a.ts", 1, 1, Severity::Error, "r1", "e1"),
+        ]);
+        let mut out = Vec::new();
+        write_pretty(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("1 error"));
+        assert!(!output.contains("warning"));
+    }
+
+    #[test]
+    fn pretty_warnings_only() {
+        let result = make_result(vec![
+            make_violation("a.ts", 1, 1, Severity::Warning, "r1", "w1"),
+            make_violation("a.ts", 2, 1, Severity::Warning, "r2", "w2"),
+        ]);
+        let mut out = Vec::new();
+        write_pretty(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("2 warnings"));
+        assert!(!output.contains("error"));
+    }
+
+    #[test]
+    fn pretty_with_source_line() {
+        let mut v = make_violation("a.tsx", 5, 1, Severity::Error, "r1", "msg");
+        v.source_line = Some("  <div className=\"bg-white\">".into());
+        let result = make_result(vec![v]);
+        let mut out = Vec::new();
+        write_pretty(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("<div className=\"bg-white\">"));
+    }
+
+    #[test]
+    fn pretty_with_suggestion() {
+        let mut v = make_violation("a.tsx", 5, 1, Severity::Error, "r1", "msg");
+        v.suggest = Some("Use bg-background instead".into());
+        let result = make_result(vec![v]);
+        let mut out = Vec::new();
+        write_pretty(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("Use bg-background instead"));
+    }
+
+    #[test]
+    fn pretty_line_only_no_column() {
+        let v = Violation {
+            rule_id: "r1".into(),
+            severity: Severity::Error,
+            file: PathBuf::from("a.ts"),
+            line: Some(7),
+            column: None,
+            message: "msg".into(),
+            suggest: None,
+            source_line: None,
+            fix: None,
+        };
+        let result = make_result(vec![v]);
+        let mut out = Vec::new();
+        write_pretty(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("7:1"));
+    }
+
+    #[test]
+    fn pretty_no_line_no_column() {
+        let v = Violation {
+            rule_id: "r1".into(),
+            severity: Severity::Error,
+            file: PathBuf::from("a.ts"),
+            line: None,
+            column: None,
+            message: "msg".into(),
+            suggest: None,
+            source_line: None,
+            fix: None,
+        };
+        let result = make_result(vec![v]);
+        let mut out = Vec::new();
+        write_pretty(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("1:1"));
+    }
+
+    #[test]
+    fn pretty_multiple_files_grouped() {
+        let result = make_result(vec![
+            make_violation("src/a.tsx", 1, 1, Severity::Error, "r1", "m1"),
+            make_violation("src/b.tsx", 2, 1, Severity::Error, "r1", "m2"),
+            make_violation("src/a.tsx", 5, 1, Severity::Warning, "r2", "m3"),
+        ]);
+        let mut out = Vec::new();
+        write_pretty(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        // Files should appear as group headers
+        assert!(output.contains("src/a.tsx"));
+        assert!(output.contains("src/b.tsx"));
+    }
+
+    #[test]
+    fn pretty_with_ratchet() {
+        let mut result = make_result(vec![
+            make_violation("a.ts", 1, 1, Severity::Error, "r1", "msg"),
+        ]);
+        result.ratchet_counts.insert("legacy".into(), (3, 5));
+        let mut out = Vec::new();
+        write_pretty(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("Ratchet rules:"));
+        assert!(output.contains("legacy"));
+        assert!(output.contains("pass"));
+    }
+
+    // ── write_ratchet_summary_pretty tests ──
+
+    #[test]
+    fn ratchet_summary_pretty_empty() {
+        let counts = HashMap::new();
+        let mut out = Vec::new();
+        write_ratchet_summary_pretty(&counts, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn ratchet_summary_pretty_pass_and_over() {
+        let mut counts = HashMap::new();
+        counts.insert("a-rule".to_string(), (2usize, 5usize));
+        counts.insert("b-rule".to_string(), (10, 3));
+        let mut out = Vec::new();
+        write_ratchet_summary_pretty(&counts, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("Ratchet rules:"));
+        assert!(output.contains("a-rule"));
+        assert!(output.contains("pass"));
+        assert!(output.contains("(2/5)"));
+        assert!(output.contains("b-rule"));
+        assert!(output.contains("OVER"));
+        assert!(output.contains("(10/3)"));
+    }
+
+    #[test]
+    fn pretty_no_violations_with_ratchet() {
+        let mut result = make_result(vec![]);
+        result.ratchet_counts.insert("legacy".into(), (2, 10));
+        let mut out = Vec::new();
+        write_pretty(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("No violations found"));
+        assert!(output.contains("Ratchet rules:"));
+        assert!(output.contains("legacy"));
+    }
+
+    #[test]
+    fn pretty_plural_errors() {
+        let result = make_result(vec![
+            make_violation("a.ts", 1, 1, Severity::Error, "r1", "e1"),
+            make_violation("a.ts", 2, 1, Severity::Error, "r2", "e2"),
+        ]);
+        let mut out = Vec::new();
+        write_pretty(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(output.contains("2 errors"));
+    }
+
+    #[test]
+    fn pretty_mixed_with_comma() {
+        let result = make_result(vec![
+            make_violation("a.ts", 1, 1, Severity::Error, "r1", "e1"),
+            make_violation("a.ts", 2, 1, Severity::Warning, "r2", "w1"),
+        ]);
+        let mut out = Vec::new();
+        write_pretty(&result, &mut out);
+
+        let output = String::from_utf8(out).unwrap();
+        // Should have comma between error and warning counts
+        assert!(output.contains("1 error"));
+        assert!(output.contains("1 warning"));
     }
 }

@@ -743,4 +743,844 @@ mod tests {
         // line_num past end should not panic
         assert!(!is_suppressed(&lines, 5, "any-rule"));
     }
+
+    // ── ScanError Display tests ──
+
+    #[test]
+    fn scan_error_display_config_read() {
+        let err = ScanError::ConfigRead(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "not found",
+        ));
+        assert!(err.to_string().contains("failed to read config"));
+    }
+
+    #[test]
+    fn scan_error_display_config_parse() {
+        let toml_err = toml::from_str::<TomlConfig>("not valid toml [[[").unwrap_err();
+        let err = ScanError::ConfigParse(toml_err);
+        assert!(err.to_string().contains("failed to parse config"));
+    }
+
+    #[test]
+    fn scan_error_display_glob_parse() {
+        let glob_err = Glob::new("[invalid").unwrap_err();
+        let err = ScanError::GlobParse(glob_err);
+        assert!(err.to_string().contains("invalid glob pattern"));
+    }
+
+    #[test]
+    fn scan_error_display_rule_factory() {
+        let err = ScanError::RuleFactory(FactoryError::UnknownRuleType("nope".into()));
+        assert!(err.to_string().contains("failed to build rule"));
+    }
+
+    #[test]
+    fn scan_error_display_preset() {
+        let err = ScanError::Preset(PresetError::UnknownPreset {
+            name: "bad".into(),
+            available: vec!["shadcn-strict"],
+        });
+        assert!(err.to_string().contains("preset error"));
+    }
+
+    #[test]
+    fn scan_error_display_git_diff() {
+        let err = ScanError::GitDiff("diff broke".into());
+        assert_eq!(err.to_string(), "git diff failed: diff broke");
+    }
+
+    // ── build_rules tests ──
+
+    #[test]
+    fn build_rules_banned_pattern_rule() {
+        let rules = vec![TomlRule {
+            id: "no-console".into(),
+            rule_type: "banned-pattern".into(),
+            pattern: Some("console\\.log".into()),
+            message: "no console.log".into(),
+            glob: Some("**/*.ts".into()),
+            ..Default::default()
+        }];
+
+        let built = build_rules(&rules).unwrap();
+        assert_eq!(built.rules.len(), 1);
+        assert!(built.ratchet_thresholds.is_empty());
+        assert!(built.file_presence_rules.is_empty());
+    }
+
+    #[test]
+    fn build_rules_ratchet_records_threshold() {
+        let rules = vec![TomlRule {
+            id: "legacy-api".into(),
+            rule_type: "ratchet".into(),
+            pattern: Some("legacyCall".into()),
+            max_count: Some(10),
+            glob: Some("**/*.ts".into()),
+            message: "legacy".into(),
+            ..Default::default()
+        }];
+
+        let built = build_rules(&rules).unwrap();
+        assert_eq!(built.rules.len(), 1);
+        assert_eq!(built.ratchet_thresholds["legacy-api"], 10);
+    }
+
+    #[test]
+    fn build_rules_file_presence_separated() {
+        let rules = vec![
+            TomlRule {
+                id: "has-readme".into(),
+                rule_type: "file-presence".into(),
+                required_files: vec!["README.md".into()],
+                message: "need readme".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-console".into(),
+                rule_type: "banned-pattern".into(),
+                pattern: Some("console\\.log".into()),
+                message: "no console".into(),
+                ..Default::default()
+            },
+        ];
+
+        let built = build_rules(&rules).unwrap();
+        assert_eq!(built.rules.len(), 1); // only banned-pattern
+        assert_eq!(built.file_presence_rules.len(), 1);
+    }
+
+    #[test]
+    fn build_rules_unknown_type_errors() {
+        let rules = vec![TomlRule {
+            id: "bad".into(),
+            rule_type: "nonexistent-rule-type".into(),
+            message: "x".into(),
+            ..Default::default()
+        }];
+
+        let result = build_rules(&rules);
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(matches!(err, ScanError::RuleFactory(_)));
+    }
+
+    #[test]
+    fn build_rules_with_exclude_glob() {
+        let rules = vec![TomlRule {
+            id: "no-console".into(),
+            rule_type: "banned-pattern".into(),
+            pattern: Some("console\\.log".into()),
+            message: "no console".into(),
+            exclude_glob: vec!["**/test/**".into()],
+            ..Default::default()
+        }];
+
+        let built = build_rules(&rules).unwrap();
+        assert_eq!(built.rules.len(), 1);
+        assert!(built.rules[0].exclusion_glob.is_some());
+    }
+
+    #[test]
+    fn build_rules_with_file_conditioning() {
+        let rules = vec![TomlRule {
+            id: "no-console".into(),
+            rule_type: "banned-pattern".into(),
+            pattern: Some("console\\.log".into()),
+            message: "no console".into(),
+            file_contains: Some("import React".into()),
+            file_not_contains: Some("// @generated".into()),
+            ..Default::default()
+        }];
+
+        let built = build_rules(&rules).unwrap();
+        assert_eq!(built.rules.len(), 1);
+        assert!(built.rules[0].file_contains.is_some());
+        assert!(built.rules[0].file_not_contains.is_some());
+    }
+
+    // ── rule_matches_file tests ──
+
+    #[test]
+    fn rule_matches_file_no_glob_matches_all() {
+        let rules = vec![TomlRule {
+            id: "r".into(),
+            rule_type: "banned-pattern".into(),
+            pattern: Some("x".into()),
+            message: "m".into(),
+            ..Default::default()
+        }];
+        let built = build_rules(&rules).unwrap();
+        assert!(rule_matches_file(&built.rules[0], "anything.rs", "anything.rs"));
+    }
+
+    #[test]
+    fn rule_matches_file_inclusion_glob_filters() {
+        let rules = vec![TomlRule {
+            id: "r".into(),
+            rule_type: "banned-pattern".into(),
+            pattern: Some("x".into()),
+            message: "m".into(),
+            glob: Some("**/*.tsx".into()),
+            ..Default::default()
+        }];
+        let built = build_rules(&rules).unwrap();
+        assert!(rule_matches_file(&built.rules[0], "src/Foo.tsx", "Foo.tsx"));
+        assert!(!rule_matches_file(&built.rules[0], "src/Foo.rs", "Foo.rs"));
+    }
+
+    #[test]
+    fn rule_matches_file_exclusion_glob_rejects() {
+        let rules = vec![TomlRule {
+            id: "r".into(),
+            rule_type: "banned-pattern".into(),
+            pattern: Some("x".into()),
+            message: "m".into(),
+            exclude_glob: vec!["**/test/**".into()],
+            ..Default::default()
+        }];
+        let built = build_rules(&rules).unwrap();
+        assert!(rule_matches_file(&built.rules[0], "src/app.ts", "app.ts"));
+        assert!(!rule_matches_file(&built.rules[0], "src/test/app.ts", "app.ts"));
+    }
+
+    // ── passes_file_conditioning tests ──
+
+    #[test]
+    fn passes_conditioning_no_conditions() {
+        let rules = vec![TomlRule {
+            id: "r".into(),
+            rule_type: "banned-pattern".into(),
+            pattern: Some("x".into()),
+            message: "m".into(),
+            ..Default::default()
+        }];
+        let built = build_rules(&rules).unwrap();
+        assert!(passes_file_conditioning(&built.rules[0], "anything"));
+    }
+
+    #[test]
+    fn passes_conditioning_file_contains_present() {
+        let rules = vec![TomlRule {
+            id: "r".into(),
+            rule_type: "banned-pattern".into(),
+            pattern: Some("x".into()),
+            message: "m".into(),
+            file_contains: Some("import React".into()),
+            ..Default::default()
+        }];
+        let built = build_rules(&rules).unwrap();
+        assert!(passes_file_conditioning(&built.rules[0], "import React from 'react';"));
+        assert!(!passes_file_conditioning(&built.rules[0], "import Vue from 'vue';"));
+    }
+
+    #[test]
+    fn passes_conditioning_file_not_contains() {
+        let rules = vec![TomlRule {
+            id: "r".into(),
+            rule_type: "banned-pattern".into(),
+            pattern: Some("x".into()),
+            message: "m".into(),
+            file_not_contains: Some("// @generated".into()),
+            ..Default::default()
+        }];
+        let built = build_rules(&rules).unwrap();
+        assert!(passes_file_conditioning(&built.rules[0], "normal code"));
+        assert!(!passes_file_conditioning(&built.rules[0], "// @generated\nnormal code"));
+    }
+
+    #[test]
+    fn passes_conditioning_both_conditions() {
+        let rules = vec![TomlRule {
+            id: "r".into(),
+            rule_type: "banned-pattern".into(),
+            pattern: Some("x".into()),
+            message: "m".into(),
+            file_contains: Some("import React".into()),
+            file_not_contains: Some("// @generated".into()),
+            ..Default::default()
+        }];
+        let built = build_rules(&rules).unwrap();
+        // Has required, missing excluded -> pass
+        assert!(passes_file_conditioning(&built.rules[0], "import React"));
+        // Missing required -> fail
+        assert!(!passes_file_conditioning(&built.rules[0], "import Vue"));
+        // Has both -> fail (file_not_contains blocks it)
+        assert!(!passes_file_conditioning(&built.rules[0], "import React // @generated"));
+    }
+
+    // ── run_rules_on_content tests ──
+
+    #[test]
+    fn run_rules_on_content_finds_violations() {
+        let rules = vec![TomlRule {
+            id: "no-console".into(),
+            rule_type: "banned-pattern".into(),
+            pattern: Some("console\\.log".into()),
+            message: "no console.log".into(),
+            regex: true,
+            ..Default::default()
+        }];
+        let built = build_rules(&rules).unwrap();
+        let path = PathBuf::from("test.ts");
+        let content = "console.log('hello');\nfoo();\n";
+
+        let violations = run_rules_on_content(&built.rules, &path, content, "test.ts", "test.ts");
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule_id, "no-console");
+    }
+
+    #[test]
+    fn run_rules_on_content_respects_suppression() {
+        let rules = vec![TomlRule {
+            id: "no-console".into(),
+            rule_type: "banned-pattern".into(),
+            pattern: Some("console\\.log".into()),
+            message: "no console.log".into(),
+            regex: true,
+            ..Default::default()
+        }];
+        let built = build_rules(&rules).unwrap();
+        let path = PathBuf::from("test.ts");
+        let content = "console.log('hello'); // guardrails:allow-no-console\n";
+
+        let violations = run_rules_on_content(&built.rules, &path, content, "test.ts", "test.ts");
+        assert_eq!(violations.len(), 0);
+    }
+
+    #[test]
+    fn run_rules_on_content_skips_non_matching_glob() {
+        let rules = vec![TomlRule {
+            id: "no-console".into(),
+            rule_type: "banned-pattern".into(),
+            pattern: Some("console\\.log".into()),
+            message: "no console.log".into(),
+            regex: true,
+            glob: Some("**/*.tsx".into()),
+            ..Default::default()
+        }];
+        let built = build_rules(&rules).unwrap();
+        let path = PathBuf::from("test.rs");
+        let content = "console.log('hello');\n";
+
+        let violations = run_rules_on_content(&built.rules, &path, content, "test.rs", "test.rs");
+        assert_eq!(violations.len(), 0);
+    }
+
+    #[test]
+    fn run_rules_on_content_skips_file_conditioning() {
+        let rules = vec![TomlRule {
+            id: "no-console".into(),
+            rule_type: "banned-pattern".into(),
+            pattern: Some("console\\.log".into()),
+            message: "no console.log".into(),
+            regex: true,
+            file_contains: Some("import React".into()),
+            ..Default::default()
+        }];
+        let built = build_rules(&rules).unwrap();
+        let path = PathBuf::from("test.ts");
+        let content = "console.log('hello');\n"; // no "import React"
+
+        let violations = run_rules_on_content(&built.rules, &path, content, "test.ts", "test.ts");
+        assert_eq!(violations.len(), 0);
+    }
+
+    // ── build_glob_set tests ──
+
+    #[test]
+    fn build_glob_set_empty() {
+        let gs = build_glob_set(&[]).unwrap();
+        assert!(!gs.is_match("anything"));
+    }
+
+    #[test]
+    fn build_glob_set_matches() {
+        let gs = build_glob_set(&["**/*.ts".into(), "**/*.tsx".into()]).unwrap();
+        assert!(gs.is_match("src/foo.ts"));
+        assert!(gs.is_match("src/foo.tsx"));
+        assert!(!gs.is_match("src/foo.rs"));
+    }
+
+    #[test]
+    fn build_glob_set_invalid_pattern() {
+        let err = build_glob_set(&["[invalid".into()]).unwrap_err();
+        assert!(matches!(err, ScanError::GlobParse(_)));
+    }
+
+    // ── run_scan integration tests ──
+
+    #[test]
+    fn run_scan_with_banned_pattern() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Write config
+        let config = dir.path().join("guardrails.toml");
+        fs::write(
+            &config,
+            r#"
+[guardrails]
+
+[[rule]]
+id = "no-console"
+type = "banned-pattern"
+severity = "error"
+pattern = "console\\.log"
+regex = true
+message = "Do not use console.log"
+"#,
+        )
+        .unwrap();
+
+        // Write a source file
+        let src_dir = dir.path().join("src");
+        fs::create_dir(&src_dir).unwrap();
+        fs::write(src_dir.join("app.ts"), "console.log('hi');\nfoo();\n").unwrap();
+
+        let result = run_scan(&config, &[src_dir]).unwrap();
+        assert_eq!(result.violations.len(), 1);
+        assert_eq!(result.violations[0].rule_id, "no-console");
+        assert_eq!(result.files_scanned, 1);
+        assert_eq!(result.rules_loaded, 1);
+    }
+
+    #[test]
+    fn run_scan_no_violations() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = dir.path().join("guardrails.toml");
+        fs::write(
+            &config,
+            r#"
+[guardrails]
+
+[[rule]]
+id = "no-console"
+type = "banned-pattern"
+severity = "error"
+pattern = "console\\.log"
+regex = true
+message = "Do not use console.log"
+glob = "**/*.ts"
+"#,
+        )
+        .unwrap();
+
+        let src_dir = dir.path().join("src");
+        fs::create_dir(&src_dir).unwrap();
+        fs::write(src_dir.join("app.ts"), "doStuff();\n").unwrap();
+
+        let result = run_scan(&config, &[src_dir]).unwrap();
+        assert!(result.violations.is_empty());
+        assert_eq!(result.files_scanned, 1);
+    }
+
+    #[test]
+    fn run_scan_excludes_files() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = dir.path().join("guardrails.toml");
+        fs::write(
+            &config,
+            r#"
+[guardrails]
+exclude = ["**/dist/**"]
+
+[[rule]]
+id = "no-console"
+type = "banned-pattern"
+severity = "error"
+pattern = "console\\.log"
+regex = true
+message = "no console"
+"#,
+        )
+        .unwrap();
+
+        // File in dist should be excluded
+        let dist_dir = dir.path().join("dist");
+        fs::create_dir(&dist_dir).unwrap();
+        fs::write(dist_dir.join("app.ts"), "console.log('hi');\n").unwrap();
+
+        let result = run_scan(&config, &[dir.path().to_path_buf()]).unwrap();
+        // The dist file should be excluded
+        for v in &result.violations {
+            assert!(!v.file.to_string_lossy().contains("dist"));
+        }
+    }
+
+    #[test]
+    fn run_scan_file_presence_rule() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = dir.path().join("guardrails.toml");
+        fs::write(
+            &config,
+            r#"
+[guardrails]
+
+[[rule]]
+id = "has-readme"
+type = "file-presence"
+severity = "error"
+required_files = ["README.md"]
+message = "README.md is required"
+"#,
+        )
+        .unwrap();
+
+        // No README.md in dir
+        let result = run_scan(&config, &[dir.path().to_path_buf()]).unwrap();
+        assert!(result.violations.iter().any(|v| v.rule_id == "has-readme"));
+    }
+
+    #[test]
+    fn run_scan_missing_config_errors() {
+        let result = run_scan(
+            Path::new("/nonexistent/guardrails.toml"),
+            &[PathBuf::from(".")],
+        );
+        assert!(result.is_err());
+        assert!(matches!(result.err().unwrap(), ScanError::ConfigRead(_)));
+    }
+
+    #[test]
+    fn run_scan_invalid_config_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("guardrails.toml");
+        fs::write(&config, "this is not valid toml [[[").unwrap();
+
+        let result = run_scan(&config, &[dir.path().to_path_buf()]);
+        assert!(result.is_err());
+        assert!(matches!(result.err().unwrap(), ScanError::ConfigParse(_)));
+    }
+
+    #[test]
+    fn run_scan_with_ratchet_rule() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = dir.path().join("guardrails.toml");
+        fs::write(
+            &config,
+            r#"
+[guardrails]
+
+[[rule]]
+id = "legacy-api"
+type = "ratchet"
+severity = "warning"
+pattern = "legacyCall"
+max_count = 5
+message = "legacy api usage"
+"#,
+        )
+        .unwrap();
+
+        let src_dir = dir.path().join("src");
+        fs::create_dir(&src_dir).unwrap();
+        fs::write(src_dir.join("app.ts"), "legacyCall();\nlegacyCall();\n").unwrap();
+
+        let result = run_scan(&config, &[src_dir]).unwrap();
+        // 2 matches, max 5 -> suppressed
+        assert!(result.violations.is_empty());
+        assert_eq!(result.ratchet_counts["legacy-api"], (2, 5));
+    }
+
+    // ── run_scan_stdin tests ──
+
+    #[test]
+    fn run_scan_stdin_finds_violations() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = dir.path().join("guardrails.toml");
+        fs::write(
+            &config,
+            r#"
+[guardrails]
+
+[[rule]]
+id = "no-console"
+type = "banned-pattern"
+severity = "error"
+pattern = "console\\.log"
+regex = true
+message = "no console.log"
+"#,
+        )
+        .unwrap();
+
+        let result =
+            run_scan_stdin(&config, "console.log('hello');\nfoo();\n", "test.ts").unwrap();
+        assert_eq!(result.violations.len(), 1);
+        assert_eq!(result.files_scanned, 1);
+    }
+
+    #[test]
+    fn run_scan_stdin_no_violations() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = dir.path().join("guardrails.toml");
+        fs::write(
+            &config,
+            r#"
+[guardrails]
+
+[[rule]]
+id = "no-console"
+type = "banned-pattern"
+severity = "error"
+pattern = "console\\.log"
+regex = true
+message = "no console.log"
+glob = "**/*.ts"
+"#,
+        )
+        .unwrap();
+
+        let result = run_scan_stdin(&config, "doStuff();\n", "app.ts").unwrap();
+        assert!(result.violations.is_empty());
+    }
+
+    #[test]
+    fn run_scan_stdin_glob_filters_filename() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = dir.path().join("guardrails.toml");
+        fs::write(
+            &config,
+            r#"
+[guardrails]
+
+[[rule]]
+id = "no-console"
+type = "banned-pattern"
+severity = "error"
+pattern = "console\\.log"
+regex = true
+message = "no console.log"
+glob = "**/*.tsx"
+"#,
+        )
+        .unwrap();
+
+        // File doesn't match glob
+        let result =
+            run_scan_stdin(&config, "console.log('hello');\n", "app.rs").unwrap();
+        assert!(result.violations.is_empty());
+    }
+
+    // ── run_baseline tests ──
+
+    #[test]
+    fn run_baseline_counts_ratchet_matches() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = dir.path().join("guardrails.toml");
+        fs::write(
+            &config,
+            r#"
+[guardrails]
+
+[[rule]]
+id = "legacy-api"
+type = "ratchet"
+severity = "warning"
+pattern = "legacyCall"
+max_count = 100
+message = "legacy usage"
+"#,
+        )
+        .unwrap();
+
+        let src_dir = dir.path().join("src");
+        fs::create_dir(&src_dir).unwrap();
+        fs::write(
+            src_dir.join("app.ts"),
+            "legacyCall();\nlegacyCall();\nlegacyCall();\n",
+        )
+        .unwrap();
+
+        let result = run_baseline(&config, &[src_dir]).unwrap();
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].rule_id, "legacy-api");
+        assert_eq!(result.entries[0].count, 3);
+        assert_eq!(result.files_scanned, 1);
+    }
+
+    #[test]
+    fn run_baseline_skips_non_ratchet_rules() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = dir.path().join("guardrails.toml");
+        fs::write(
+            &config,
+            r#"
+[guardrails]
+
+[[rule]]
+id = "no-console"
+type = "banned-pattern"
+severity = "error"
+pattern = "console\\.log"
+regex = true
+message = "no console"
+
+[[rule]]
+id = "legacy-api"
+type = "ratchet"
+severity = "warning"
+pattern = "legacyCall"
+max_count = 100
+message = "legacy usage"
+"#,
+        )
+        .unwrap();
+
+        let src_dir = dir.path().join("src");
+        fs::create_dir(&src_dir).unwrap();
+        fs::write(src_dir.join("app.ts"), "console.log('hi');\nlegacyCall();\n").unwrap();
+
+        let result = run_baseline(&config, &[src_dir]).unwrap();
+        // Only ratchet rules appear in baseline
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].rule_id, "legacy-api");
+    }
+
+    // ── collect_files tests ──
+
+    #[test]
+    fn collect_files_single_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.ts");
+        fs::write(&file, "content").unwrap();
+
+        let empty_glob = build_glob_set(&[]).unwrap();
+        let files = collect_files(&[file.clone()], &empty_glob);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0], file);
+    }
+
+    #[test]
+    fn collect_files_directory_walk() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("a.ts"), "a").unwrap();
+        fs::write(sub.join("b.ts"), "b").unwrap();
+
+        let empty_glob = build_glob_set(&[]).unwrap();
+        let files = collect_files(&[dir.path().to_path_buf()], &empty_glob);
+        assert_eq!(files.len(), 2);
+    }
+
+    #[test]
+    fn collect_files_excludes_patterns() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("keep.ts"), "keep").unwrap();
+        fs::write(dir.path().join("skip.log"), "skip").unwrap();
+
+        let exclude = build_glob_set(&["*.log".into()]).unwrap();
+        let files = collect_files(&[dir.path().to_path_buf()], &exclude);
+        assert!(files.iter().all(|f| !f.to_string_lossy().ends_with(".log")));
+        assert!(files.iter().any(|f| f.to_string_lossy().ends_with(".ts")));
+    }
+
+    // ── run_scan with presets ──
+
+    #[test]
+    fn run_scan_with_preset() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = dir.path().join("guardrails.toml");
+        fs::write(
+            &config,
+            r#"
+[guardrails]
+extends = ["shadcn-strict"]
+"#,
+        )
+        .unwrap();
+
+        let src_dir = dir.path().join("src");
+        fs::create_dir(&src_dir).unwrap();
+        fs::write(src_dir.join("app.tsx"), "export default function App() { return <div>hi</div>; }\n").unwrap();
+
+        let result = run_scan(&config, &[src_dir]).unwrap();
+        // Just verify it doesn't error
+        assert!(result.rules_loaded > 0);
+    }
+
+    // ── run_scan with plugins ──
+
+    #[test]
+    fn run_scan_with_plugin() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let plugin_path = dir.path().join("custom-rules.toml");
+        fs::write(
+            &plugin_path,
+            r#"
+[[rule]]
+id = "no-todo"
+type = "banned-pattern"
+severity = "warning"
+pattern = "TODO"
+message = "No TODOs allowed"
+"#,
+        )
+        .unwrap();
+
+        let config = dir.path().join("guardrails.toml");
+        fs::write(
+            &config,
+            format!(
+                r#"
+[guardrails]
+plugins = ["{}"]
+"#,
+                plugin_path.display()
+            ),
+        )
+        .unwrap();
+
+        let src_dir = dir.path().join("src");
+        fs::create_dir(&src_dir).unwrap();
+        fs::write(src_dir.join("app.ts"), "// TODO: fix this\n").unwrap();
+
+        let result = run_scan(&config, &[src_dir]).unwrap();
+        assert!(result.violations.iter().any(|v| v.rule_id == "no-todo"));
+    }
+
+    #[test]
+    fn run_scan_skip_no_matching_files() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = dir.path().join("guardrails.toml");
+        fs::write(
+            &config,
+            r#"
+[guardrails]
+
+[[rule]]
+id = "no-console"
+type = "banned-pattern"
+severity = "error"
+pattern = "console\\.log"
+regex = true
+message = "no console"
+glob = "**/*.tsx"
+"#,
+        )
+        .unwrap();
+
+        let src_dir = dir.path().join("src");
+        fs::create_dir(&src_dir).unwrap();
+        // Write a .rs file that won't match the *.tsx glob
+        fs::write(src_dir.join("app.rs"), "console.log('hello');\n").unwrap();
+
+        let result = run_scan(&config, &[src_dir]).unwrap();
+        assert!(result.violations.is_empty());
+        // The file shouldn't even be read since no rule matches
+        assert_eq!(result.files_scanned, 0);
+    }
 }
