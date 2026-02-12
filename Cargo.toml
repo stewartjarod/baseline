@@ -2,6 +2,7 @@
 name = "guardrails"
 version = "0.1.0"
 edition = "2021"
+description = "Enforce architectural decisions AI coding tools keep ignoring"
 
 [dependencies]
 regex = "1"
