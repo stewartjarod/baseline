@@ -32,11 +32,21 @@ enum Preset {
     ShadcnStrict,
     ShadcnMigrate,
     AiSafety,
+    Security,
+    Nextjs,
+    AiCodegen,
 }
 
 /// Returns the list of all available preset names.
 pub fn available_presets() -> &'static [&'static str] {
-    &["shadcn-strict", "shadcn-migrate", "ai-safety"]
+    &[
+        "shadcn-strict",
+        "shadcn-migrate",
+        "ai-safety",
+        "security",
+        "nextjs",
+        "ai-codegen",
+    ]
 }
 
 fn resolve_preset(name: &str) -> Option<Preset> {
@@ -44,6 +54,9 @@ fn resolve_preset(name: &str) -> Option<Preset> {
         "shadcn-strict" => Some(Preset::ShadcnStrict),
         "shadcn-migrate" => Some(Preset::ShadcnMigrate),
         "ai-safety" => Some(Preset::AiSafety),
+        "security" => Some(Preset::Security),
+        "nextjs" => Some(Preset::Nextjs),
+        "ai-codegen" => Some(Preset::AiCodegen),
         _ => None,
     }
 }
@@ -156,6 +169,310 @@ fn preset_rules(preset: Preset) -> Vec<TomlRule> {
                 severity: "error".into(),
                 packages: vec!["request".into(), "request-promise".into()],
                 message: "The 'request' package is deprecated — use 'node-fetch' or 'undici'".into(),
+                ..Default::default()
+            },
+        ],
+        Preset::Security => vec![
+            TomlRule {
+                id: "no-env-files".into(),
+                rule_type: "file-presence".into(),
+                severity: "error".into(),
+                forbidden_files: vec![
+                    ".env".into(),
+                    ".env.local".into(),
+                    ".env.development".into(),
+                    ".env.production".into(),
+                    ".env.staging".into(),
+                ],
+                message: "Environment files must not be committed — add to .gitignore".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-hardcoded-secrets".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                pattern: Some(r#"(?i)(?:api_key|apikey|secret_key|secretkey|auth_token|access_token|private_key|password|passwd|secret|client_secret)\s*[:=]\s*["'][a-zA-Z0-9_\-]{8,}"#.into()),
+                regex: true,
+                exclude_glob: vec!["**/*.test.*".into(), "**/*.spec.*".into()],
+                message: "Hardcoded secret detected — use environment variables instead".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-eval".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                pattern: Some(r"\beval\s*\(".into()),
+                regex: true,
+                message: "eval() is a security risk — avoid arbitrary code execution".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-dangerous-html".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                pattern: Some("dangerouslySetInnerHTML".into()),
+                message: "dangerouslySetInnerHTML can lead to XSS — sanitize content or use a safe alternative".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-innerhtml".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                pattern: Some(r"\.innerHTML\s*\+?=".into()),
+                regex: true,
+                message: "Direct innerHTML assignment can lead to XSS — use textContent or a sanitizer".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-console-log".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                pattern: Some(r"console\.(log|debug)\(".into()),
+                regex: true,
+                exclude_glob: vec!["**/*.test.*".into(), "**/*.spec.*".into()],
+                message: "Remove console.log/debug before deploying to production".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-document-write".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                pattern: Some(r"document\.write\s*\(".into()),
+                regex: true,
+                message: "document.write() is an XSS risk and blocks rendering — use DOM APIs instead".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-postmessage-wildcard".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                pattern: Some(r#"\.postMessage\(.*,\s*['"]\*['"]"#.into()),
+                regex: true,
+                message: "postMessage with '*' origin exposes data to any window — specify the target origin".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-outerhtml".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                pattern: Some(r"\.outerHTML\s*\+?=".into()),
+                regex: true,
+                message: "Direct outerHTML assignment can lead to XSS — use DOM APIs or a sanitizer".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-http-links".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{ts,tsx,js,jsx}".into()),
+                pattern: Some(r#"['"]http://"#.into()),
+                regex: true,
+                exclude_glob: vec!["**/*.test.*".into(), "**/*.spec.*".into()],
+                message: "Insecure http:// URL — use https:// instead".into(),
+                ..Default::default()
+            },
+        ],
+        Preset::Nextjs => vec![
+            TomlRule {
+                id: "use-next-image".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"<img\s".into()),
+                regex: true,
+                message: "Use next/image instead of <img> for automatic optimization".into(),
+                suggest: Some("Import Image from 'next/image' and use <Image> component".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-next-head".into(),
+                rule_type: "banned-import".into(),
+                severity: "error".into(),
+                glob: Some("app/**".into()),
+                packages: vec!["next/head".into()],
+                message: "next/head is not supported in App Router — use the Metadata API instead".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-private-env-client".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                glob: Some("**/*.{ts,tsx,js,jsx}".into()),
+                // Alternation-based exclusion of NEXT_PUBLIC_ (regex crate lacks lookahead)
+                pattern: Some(r"process\.env\.(?:[A-MO-Za-z_]\w*|N[A-DF-Za-z0-9_]\w*|NE[A-WYZa-z0-9_]\w*|NEX[A-SU-Za-z0-9_]\w*|NEXT[A-Za-z0-9]\w*|NEXT_[A-OQ-Za-z0-9_]\w*|NEXT_P[A-TV-Za-z0-9_]\w*|NEXT_PU[A-AC-Za-z0-9_]\w*|NEXT_PUB[A-KM-Za-z0-9_]\w*|NEXT_PUBL[A-HJ-Za-z0-9_]\w*|NEXT_PUBLI[A-BD-Za-z0-9_]\w*|NEXT_PUBLIC[A-Za-z0-9]\w*)".into()),
+                regex: true,
+                file_contains: Some("use client".into()),
+                message: "Private env vars are undefined in client components — prefix with NEXT_PUBLIC_".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "require-use-client-for-hooks".into(),
+                rule_type: "required-pattern".into(),
+                severity: "error".into(),
+                glob: Some("app/**".into()),
+                pattern: Some("use client".into()),
+                regex: true,
+                condition_pattern: Some(r"use(State|Effect|Context|Reducer|Callback|Memo|Ref|Transition|DeferredValue|InsertionEffect|SyncExternalStore|FormStatus|Optimistic)\s*\(".into()),
+                message: "Files using React hooks must include 'use client' directive in App Router".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "use-next-link".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r#"<a\s+href=["']/"#.into()),
+                regex: true,
+                message: "Use next/link instead of <a> for client-side navigation".into(),
+                suggest: Some("Import Link from 'next/link' and use <Link> component".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-next-router-in-app".into(),
+                rule_type: "banned-import".into(),
+                severity: "error".into(),
+                glob: Some("app/**".into()),
+                packages: vec!["next/router".into()],
+                message: "next/router is not available in App Router — use next/navigation instead".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-sync-scripts".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"<script\s".into()),
+                regex: true,
+                message: "Use next/script instead of <script> for optimized script loading".into(),
+                suggest: Some("Import Script from 'next/script' and use <Script> component".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-link-fonts".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"<link[^>]*fonts\.googleapis\.com".into()),
+                regex: true,
+                message: "Use next/font instead of Google Fonts <link> for zero layout shift".into(),
+                suggest: Some("Import from 'next/font/google' for automatic font optimization".into()),
+                ..Default::default()
+            },
+        ],
+        Preset::AiCodegen => vec![
+            TomlRule {
+                id: "no-placeholder-text".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                pattern: Some(r"(?i)lorem ipsum".into()),
+                regex: true,
+                message: "Placeholder text detected — replace with real content".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-unresolved-todos".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                pattern: Some(r"(?://|/?\*)\s*(TODO|FIXME|HACK|XXX)\b".into()),
+                regex: true,
+                message: "Unresolved TODO/FIXME comment — address or remove before merging".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-type-any".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                glob: Some("**/*.{ts,tsx}".into()),
+                pattern: Some(r"[:<,]\s*any\b".into()),
+                regex: true,
+                exclude_glob: vec!["**/*.d.ts".into()],
+                message: "Avoid using 'any' type — use a specific type or 'unknown'".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-empty-catch".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                pattern: Some(r"catch\s*\([^)]*\)\s*\{\s*\}".into()),
+                regex: true,
+                message: "Empty catch block swallows errors — handle or re-throw the error".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-console-log".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                pattern: Some(r"console\.(log|debug)\(".into()),
+                regex: true,
+                exclude_glob: vec!["**/*.test.*".into(), "**/*.spec.*".into()],
+                message: "Remove console.log/debug before merging — use a proper logger if needed".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-ts-ignore".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                glob: Some("**/*.{ts,tsx}".into()),
+                pattern: Some("@ts-ignore".into()),
+                message: "Use @ts-expect-error instead of @ts-ignore for type suppressions".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-as-any".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                glob: Some("**/*.{ts,tsx}".into()),
+                pattern: Some(r"\bas\s+any\b".into()),
+                regex: true,
+                message: "Avoid 'as any' type assertion — use proper types or 'as unknown'".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-eslint-disable".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                pattern: Some("eslint-disable".into()),
+                message: "Remove eslint-disable comment — fix the underlying issue instead".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-ts-nocheck".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                glob: Some("**/*.{ts,tsx}".into()),
+                pattern: Some("@ts-nocheck".into()),
+                message: "Do not disable type checking for entire files — fix type errors instead".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-var".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                glob: Some("**/*.{ts,tsx,js,jsx}".into()),
+                pattern: Some(r"\bvar\s+\w".into()),
+                regex: true,
+                exclude_glob: vec!["**/*.d.ts".into()],
+                message: "Use 'let' or 'const' instead of 'var'".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-require-in-ts".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{ts,tsx}".into()),
+                pattern: Some(r"\brequire\s*\(".into()),
+                regex: true,
+                message: "Use ES module 'import' instead of CommonJS 'require()' in TypeScript".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-non-null-assertion".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{ts,tsx}".into()),
+                pattern: Some(r"\w![.\[]".into()),
+                regex: true,
+                message: "Avoid non-null assertion (!) — use optional chaining (?.) or proper null checks".into(),
                 ..Default::default()
             },
         ],
@@ -339,6 +656,57 @@ mod tests {
     }
 
     #[test]
+    fn security_has_ten_rules() {
+        let rules = preset_rules(Preset::Security);
+        assert_eq!(rules.len(), 10);
+        let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
+        assert!(ids.contains(&"no-env-files"));
+        assert!(ids.contains(&"no-hardcoded-secrets"));
+        assert!(ids.contains(&"no-eval"));
+        assert!(ids.contains(&"no-dangerous-html"));
+        assert!(ids.contains(&"no-innerhtml"));
+        assert!(ids.contains(&"no-console-log"));
+        assert!(ids.contains(&"no-document-write"));
+        assert!(ids.contains(&"no-postmessage-wildcard"));
+        assert!(ids.contains(&"no-outerhtml"));
+        assert!(ids.contains(&"no-http-links"));
+    }
+
+    #[test]
+    fn nextjs_has_eight_rules() {
+        let rules = preset_rules(Preset::Nextjs);
+        assert_eq!(rules.len(), 8);
+        let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
+        assert!(ids.contains(&"use-next-image"));
+        assert!(ids.contains(&"no-next-head"));
+        assert!(ids.contains(&"no-private-env-client"));
+        assert!(ids.contains(&"require-use-client-for-hooks"));
+        assert!(ids.contains(&"use-next-link"));
+        assert!(ids.contains(&"no-next-router-in-app"));
+        assert!(ids.contains(&"no-sync-scripts"));
+        assert!(ids.contains(&"no-link-fonts"));
+    }
+
+    #[test]
+    fn ai_codegen_has_twelve_rules() {
+        let rules = preset_rules(Preset::AiCodegen);
+        assert_eq!(rules.len(), 12);
+        let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
+        assert!(ids.contains(&"no-placeholder-text"));
+        assert!(ids.contains(&"no-unresolved-todos"));
+        assert!(ids.contains(&"no-type-any"));
+        assert!(ids.contains(&"no-empty-catch"));
+        assert!(ids.contains(&"no-console-log"));
+        assert!(ids.contains(&"no-ts-ignore"));
+        assert!(ids.contains(&"no-as-any"));
+        assert!(ids.contains(&"no-eslint-disable"));
+        assert!(ids.contains(&"no-ts-nocheck"));
+        assert!(ids.contains(&"no-var"));
+        assert!(ids.contains(&"no-require-in-ts"));
+        assert!(ids.contains(&"no-non-null-assertion"));
+    }
+
+    #[test]
     fn all_preset_names_resolve() {
         for name in available_presets() {
             assert!(
@@ -347,5 +715,236 @@ mod tests {
                 name
             );
         }
+    }
+
+    #[test]
+    fn all_preset_regex_patterns_compile() {
+        use regex::Regex;
+        for name in available_presets() {
+            let preset = resolve_preset(name).unwrap();
+            for rule in preset_rules(preset) {
+                if rule.regex {
+                    if let Some(ref pat) = rule.pattern {
+                        Regex::new(pat).unwrap_or_else(|e| {
+                            panic!("preset '{}', rule '{}': invalid pattern: {}", name, rule.id, e)
+                        });
+                    }
+                    if let Some(ref pat) = rule.condition_pattern {
+                        Regex::new(pat).unwrap_or_else(|e| {
+                            panic!(
+                                "preset '{}', rule '{}': invalid condition_pattern: {}",
+                                name, rule.id, e
+                            )
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn no_private_env_client_pattern_correctness() {
+        use regex::Regex;
+        let rules = preset_rules(Preset::Nextjs);
+        let rule = rules.iter().find(|r| r.id == "no-private-env-client").unwrap();
+        let re = Regex::new(rule.pattern.as_ref().unwrap()).unwrap();
+
+        // Should match private env vars
+        assert!(re.is_match("process.env.DATABASE_URL"));
+        assert!(re.is_match("process.env.API_SECRET"));
+        assert!(re.is_match("process.env.NODE_ENV"));
+        assert!(re.is_match("process.env.NEXT_RUNTIME"));
+
+        // Should NOT match NEXT_PUBLIC_ prefixed vars
+        assert!(!re.is_match("process.env.NEXT_PUBLIC_API_URL"));
+        assert!(!re.is_match("process.env.NEXT_PUBLIC_STRIPE_KEY"));
+    }
+
+    /// Helper: get a compiled Regex for a preset rule by preset and rule id.
+    fn regex_for(preset: Preset, rule_id: &str) -> regex::Regex {
+        let rules = preset_rules(preset);
+        let rule = rules
+            .iter()
+            .find(|r| r.id == rule_id)
+            .unwrap_or_else(|| panic!("rule '{}' not found", rule_id));
+        regex::Regex::new(rule.pattern.as_ref().unwrap()).unwrap()
+    }
+
+    // ── Security pattern tests ─────────────────────────────────────────
+
+    #[test]
+    fn no_document_write_pattern() {
+        let re = regex_for(Preset::Security, "no-document-write");
+        assert!(re.is_match("document.write('hello')"));
+        assert!(re.is_match("document.write (html)"));
+        assert!(re.is_match("  document.write('<div>')"));
+        // read access is fine
+        assert!(!re.is_match("const w = document.writeln"));
+        assert!(!re.is_match("documentWriter()"));
+    }
+
+    #[test]
+    fn no_postmessage_wildcard_pattern() {
+        let re = regex_for(Preset::Security, "no-postmessage-wildcard");
+        assert!(re.is_match("window.postMessage(data, '*')"));
+        assert!(re.is_match(r#"iframe.contentWindow.postMessage({}, "*")"#));
+        assert!(re.is_match("  w.postMessage(msg, '*')"));
+        // specific origins are fine
+        assert!(!re.is_match("window.postMessage(data, 'https://example.com')"));
+        assert!(!re.is_match("window.postMessage(data, origin)"));
+    }
+
+    #[test]
+    fn no_outerhtml_pattern() {
+        let re = regex_for(Preset::Security, "no-outerhtml");
+        assert!(re.is_match("el.outerHTML = '<div>'"));
+        assert!(re.is_match("el.outerHTML += '<span>'"));
+        assert!(re.is_match("  node.outerHTML = html"));
+        // reading outerHTML is fine
+        assert!(!re.is_match("const html = el.outerHTML"));
+        assert!(!re.is_match("console.log(el.outerHTML)"));
+    }
+
+    #[test]
+    fn no_http_links_pattern() {
+        let re = regex_for(Preset::Security, "no-http-links");
+        assert!(re.is_match(r#"fetch("http://api.example.com")"#));
+        assert!(re.is_match("const url = 'http://cdn.example.com'"));
+        // https is fine
+        assert!(!re.is_match(r#"fetch("https://api.example.com")"#));
+        // not in a string literal
+        assert!(!re.is_match("// visit http://example.com"));
+    }
+
+    #[test]
+    fn no_hardcoded_secrets_expanded() {
+        let re = regex_for(Preset::Security, "no-hardcoded-secrets");
+        // original keywords still work
+        assert!(re.is_match(r#"api_key = "abc12345678""#));
+        assert!(re.is_match(r#"API_KEY: "abc12345678""#));
+        // new keywords
+        assert!(re.is_match(r#"password = "mysecretpass""#));
+        assert!(re.is_match(r#"PASSWORD: "supersecret1""#));
+        assert!(re.is_match(r#"client_secret = "abcdefghij""#));
+        // short values (< 8 chars) should NOT match
+        assert!(!re.is_match(r#"password = "short""#));
+        // no string value should NOT match
+        assert!(!re.is_match("password = getPassword()"));
+    }
+
+    // ── Next.js pattern tests ──────────────────────────────────────────
+
+    #[test]
+    fn no_sync_scripts_pattern() {
+        let re = regex_for(Preset::Nextjs, "no-sync-scripts");
+        assert!(re.is_match(r#"<script src="analytics.js">"#));
+        assert!(re.is_match(r#"<script type="application/ld+json">"#));
+        // next/script component (uppercase) should NOT match
+        assert!(!re.is_match(r#"<Script src="analytics.js">"#));
+        // closing tag should NOT match
+        assert!(!re.is_match("</script>"));
+    }
+
+    #[test]
+    fn no_link_fonts_pattern() {
+        let re = regex_for(Preset::Nextjs, "no-link-fonts");
+        assert!(re.is_match(
+            r#"<link href="https://fonts.googleapis.com/css2?family=Inter" rel="stylesheet" />"#
+        ));
+        assert!(re.is_match(
+            r#"<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto">"#
+        ));
+        // other link tags should NOT match
+        assert!(!re.is_match(r#"<link rel="stylesheet" href="/styles.css" />"#));
+        // next/link is fine
+        assert!(!re.is_match(r#"<Link href="/fonts">"#));
+    }
+
+    // ── AI Codegen pattern tests ───────────────────────────────────────
+
+    #[test]
+    fn no_eslint_disable_pattern() {
+        let rules = preset_rules(Preset::AiCodegen);
+        let rule = rules.iter().find(|r| r.id == "no-eslint-disable").unwrap();
+        let pat = rule.pattern.as_ref().unwrap();
+        // literal match (no regex)
+        assert!(!rule.regex);
+        assert!("// eslint-disable-next-line no-console".contains(pat.as_str()));
+        assert!("/* eslint-disable */".contains(pat.as_str()));
+        assert!("/* eslint-disable-next-line */".contains(pat.as_str()));
+    }
+
+    #[test]
+    fn no_var_pattern() {
+        let re = regex_for(Preset::AiCodegen, "no-var");
+        assert!(re.is_match("var x = 1"));
+        assert!(re.is_match("var foo = 'bar'"));
+        assert!(re.is_match("  var count = 0;"));
+        // should NOT match these
+        assert!(!re.is_match("const variable = 1"));
+        assert!(!re.is_match("let variance = 2"));
+        assert!(!re.is_match("const isVariable = true"));
+    }
+
+    #[test]
+    fn no_require_in_ts_pattern() {
+        let re = regex_for(Preset::AiCodegen, "no-require-in-ts");
+        assert!(re.is_match("const fs = require('fs')"));
+        assert!(re.is_match("const x = require('./module')"));
+        assert!(re.is_match("require('dotenv').config()"));
+        // import is fine
+        assert!(!re.is_match("import fs from 'fs'"));
+        // require.resolve is different (no parens right after require)
+        assert!(!re.is_match("require.resolve('./path')"));
+    }
+
+    #[test]
+    fn no_non_null_assertion_pattern() {
+        let re = regex_for(Preset::AiCodegen, "no-non-null-assertion");
+        // should match non-null assertions
+        assert!(re.is_match("user!.name"));
+        assert!(re.is_match("items![0]"));
+        assert!(re.is_match("this.ref!.current"));
+        assert!(re.is_match("data!.results"));
+        // should NOT match these
+        assert!(!re.is_match("x !== y"));
+        assert!(!re.is_match("x != y"));
+        assert!(!re.is_match("if (!foo) {}"));
+        assert!(!re.is_match("!!value"));
+        assert!(!re.is_match("foo!==bar"));
+    }
+
+    #[test]
+    fn no_non_null_assertion_no_false_positives_on_strings() {
+        let re = regex_for(Preset::AiCodegen, "no-non-null-assertion");
+        // String ending in '!' with method call — quote sits between ! and .
+        assert!(!re.is_match(r#""Warning!".toUpperCase()"#));
+        assert!(!re.is_match(r#"'Error!'.length"#));
+        assert!(!re.is_match(r#"'Click me!'[0]"#));
+    }
+
+    #[test]
+    fn no_innerhtml_catches_plus_equals() {
+        let re = regex_for(Preset::Security, "no-innerhtml");
+        assert!(re.is_match("el.innerHTML = html"));
+        assert!(re.is_match("el.innerHTML += '<br>'"));
+        assert!(re.is_match("el.innerHTML  =  content"));
+        assert!(!re.is_match("const x = el.innerHTML"));
+    }
+
+    #[test]
+    fn no_type_any_catches_generics() {
+        let re = regex_for(Preset::AiCodegen, "no-type-any");
+        // type annotation
+        assert!(re.is_match("const x: any = 1"));
+        // generic position
+        assert!(re.is_match("Array<any>"));
+        assert!(re.is_match("Promise<any>"));
+        assert!(re.is_match("Record<string, any>"));
+        assert!(re.is_match("Map<string, any>"));
+        // should NOT match word 'any' in other contexts
+        assert!(!re.is_match("// handle any case"));
+        assert!(!re.is_match("const anything = 1"));
+        assert!(!re.is_match("if (any_flag) {}"));
     }
 }
