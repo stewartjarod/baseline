@@ -165,6 +165,14 @@ message = "Competing CSS framework detected — this project uses Tailwind"
 # required_files = ["README.md", "LICENSE", ".env.example"]
 # message = "Projects must have required documentation files"
 
+# [[rule]]
+# id = "no-env-committed"
+# type = "file-presence"
+# severity = "error"
+# forbidden_files = [".env", ".env.local", ".env.production"]
+# message = "Environment files must not be committed"
+# suggest = "Add to .gitignore and remove from version control"
+
 
 # ══════════════════════════════════════════════
 # WINDOW / PROXIMITY RULES

@@ -54,6 +54,8 @@ pub struct TomlRule {
     pub file_not_contains: Option<String>,
     #[serde(default)]
     pub required_files: Vec<String>,
+    #[serde(default)]
+    pub forbidden_files: Vec<String>,
     pub condition_pattern: Option<String>,
 }
 
@@ -81,6 +83,7 @@ impl Default for TomlRule {
             file_contains: None,
             file_not_contains: None,
             required_files: Vec::new(),
+            forbidden_files: Vec::new(),
             condition_pattern: None,
         }
     }
@@ -111,6 +114,7 @@ impl TomlRule {
             file_contains: self.file_contains.clone(),
             file_not_contains: self.file_not_contains.clone(),
             required_files: self.required_files.clone(),
+            forbidden_files: self.forbidden_files.clone(),
             condition_pattern: self.condition_pattern.clone(),
         }
     }

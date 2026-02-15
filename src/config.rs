@@ -35,6 +35,8 @@ pub struct RuleConfig {
     pub file_not_contains: Option<String>,
     /// Required files that must exist (used by file-presence rule).
     pub required_files: Vec<String>,
+    /// Forbidden files that must NOT exist (used by file-presence rule).
+    pub forbidden_files: Vec<String>,
     /// Condition pattern: only enforce required-pattern if this pattern is present.
     pub condition_pattern: Option<String>,
 }
@@ -58,6 +60,7 @@ impl Default for RuleConfig {
             file_contains: None,
             file_not_contains: None,
             required_files: Vec::new(),
+            forbidden_files: Vec::new(),
             condition_pattern: None,
         }
     }
