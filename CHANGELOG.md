@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.5.0] - 2026-02-16
+
+### Features
+- add ratchet add/down/from CLI commands (87db4b6)
+
 ## [v0.4.0] - 2026-02-14
 
 ### Features

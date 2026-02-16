@@ -1,6 +1,6 @@
 {
   "name": "code-guardrails-linux-x64",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Guardrails CLI binary for Linux x64",
   "license": "MIT",
   "repository": {
