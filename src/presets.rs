@@ -466,7 +466,32 @@ fn preset_rules(preset: Preset) -> Vec<TomlRule> {
                 suggest: Some("Use transform: scale() or translate() for smooth GPU-accelerated animations".into()),
                 ..Default::default()
             },
+            // ── Async ─────────────────────────────────────────────────
+            TomlRule {
+                id: "no-sequential-await".into(),
+                rule_type: "window-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{ts,tsx,js,jsx}".into()),
+                pattern: Some(r"^\s*(?:const\s+\w+\s*=\s*)?await\s".into()),
+                condition_pattern: Some(r"^\s*(?:const\s+\w+\s*=\s*)?await\s".into()),
+                max_count: Some(3),
+                regex: true,
+                message: "Sequential await statements may run slower than necessary — use Promise.all() for independent operations".into(),
+                suggest: Some("const [a, b] = await Promise.all([fetchA(), fetchB()])".into()),
+                ..Default::default()
+            },
             // ── State & Effects ──────────────────────────────────────
+            TomlRule {
+                id: "no-derived-state-effect".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"useEffect\(\(\)\s*(?:=>)?\s*\{?\s*set[A-Z]\w*\(".into()),
+                regex: true,
+                message: "useEffect that only calls setState is derived state — compute during render instead".into(),
+                suggest: Some("Replace with: const derived = useMemo(() => compute(dep), [dep])".into()),
+                ..Default::default()
+            },
             TomlRule {
                 id: "no-fetch-in-effect".into(),
                 rule_type: "banned-pattern".into(),
@@ -1019,9 +1044,9 @@ mod tests {
     }
 
     #[test]
-    fn react_has_fourteen_rules() {
+    fn react_has_sixteen_rules() {
         let rules = preset_rules(Preset::React);
-        assert_eq!(rules.len(), 14);
+        assert_eq!(rules.len(), 16);
         let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
         assert!(ids.contains(&"no-array-index-key"));
         assert!(ids.contains(&"no-conditional-render-zero"));
@@ -1033,6 +1058,8 @@ mod tests {
         assert!(ids.contains(&"no-new-function"));
         assert!(ids.contains(&"no-transition-all"));
         assert!(ids.contains(&"no-layout-animation"));
+        assert!(ids.contains(&"no-sequential-await"));
+        assert!(ids.contains(&"no-derived-state-effect"));
         assert!(ids.contains(&"no-fetch-in-effect"));
         assert!(ids.contains(&"no-lazy-state-init"));
         assert!(ids.contains(&"no-object-dep-array"));
