@@ -33,7 +33,7 @@ Linters catch syntax. Formatters fix whitespace. **baseline** enforces the decis
 ESLint is great at what it does. baseline handles what it can't:
 
 - **Ratcheting.** ESLint is pass/fail. baseline counts occurrences across your codebase and enforces a ceiling that only goes down. You can migrate 200 legacy calls to 0 at your own pace — and CI prevents regressions at every step.
-- **Dependency bans.** ESLint checks source files. baseline parses `package.json`, `Cargo.toml`, `requirements.txt`, and `go.mod` to catch banned packages before they ship — even if no source file imports them yet.
+- **Dependency bans.** ESLint checks source files. baseline parses `package.json` to catch banned packages before they ship — even if no source file imports them yet.
 - **File presence rules.** Enforce that `README.md`, `LICENSE`, and CI configs exist. Forbid `.env` files from being committed. ESLint has no concept of project-level structure.
 - **Cross-file counting.** baseline aggregates pattern matches across your entire codebase. "There should be fewer than 50 uses of legacyFetch" is a one-liner in `baseline.toml` and impossible in ESLint without a custom plugin.
 - **Zero config for Tailwind/shadcn.** Built-in rules enforce dark mode variants and semantic token usage with 130+ default mappings. No plugins, no parser setup, no dependencies.
@@ -107,10 +107,53 @@ exclude = [
     "**/dist/**",
     "**/build/**",
 ]
-root = "."  # optional, defaults to current directory
 ```
 
 The `exclude` list above is applied by default even if you don't specify it.
+
+> **Note:** The `include` field documents which paths your project cares about, but scanning scope is controlled by the `paths` CLI argument (e.g. `baseline scan src`). The file walker also respects `.gitignore` automatically.
+
+### Presets
+
+Load a curated set of rules in one line with `extends`. User-defined `[[rule]]` entries with the same `id` as a preset rule override the preset version entirely.
+
+```toml
+[baseline]
+extends = ["shadcn-strict", "ai-codegen"]
+```
+
+Available presets:
+
+| Preset | Rules | Description |
+|---|---|---|
+| `shadcn-strict` | 5 | Dark mode enforcement (error), theme tokens (error), no inline styles, no CSS-in-JS, no competing frameworks |
+| `shadcn-migrate` | 2 | Dark mode enforcement (error), theme tokens (warning) — softer, for gradual migration |
+| `ai-safety` | 3 | Bans deprecated packages: moment, lodash, request |
+| `security` | 10 | No .env files, no hardcoded secrets, no eval, no dangerouslySetInnerHTML, no innerHTML, no document.write, no wildcard postMessage, no http:// URLs, no console.log |
+| `nextjs` | 8 | Use next/image, next/link, next/font, next/script; no next/head or next/router in App Router; no private env vars in client components; require 'use client' for hooks |
+| `ai-codegen` | 12 | No placeholder text, no TODOs, no `any` type, no empty catch, no console.log, no @ts-ignore, no `as any`, no eslint-disable, no @ts-nocheck, no var, no require in TS, no non-null assertions |
+
+### Plugins
+
+Load additional rules from external TOML files:
+
+```toml
+[baseline]
+plugins = ["./plugins/react-rules.toml", "./plugins/security-rules.toml"]
+```
+
+Plugin files contain `[[rule]]` entries in the same format as your main config:
+
+```toml
+# plugins/react-rules.toml
+[[rule]]
+id = "no-default-export"
+type = "banned-pattern"
+severity = "warning"
+pattern = "export default"
+glob = "src/components/**/*.tsx"
+message = "Use named exports for components"
+```
 
 ---
 
@@ -118,7 +161,7 @@ The `exclude` list above is applied by default even if you don't specify it.
 
 ### `banned-import` — Stop deprecated package imports
 
-Detects `import`, `require`, `from ... import`, and `use` statements across JavaScript, TypeScript, Python, and Rust.
+Detects `import`, `require`, and `export ... from` statements in JavaScript and TypeScript files. Defaults to scanning `**/*.{ts,tsx,js,jsx,mjs,cjs}`.
 
 ```toml
 [[rule]]
@@ -133,15 +176,12 @@ suggest = "import { format } from 'date-fns'"
 Catches all of these:
 
 ```js
-import moment from 'moment';           // ES6
-const moment = require('moment');       // CommonJS
-```
-```python
-import moment                           # Python
-from moment import format               # Python
-```
-```rust
-use moment::format;                     // Rust
+import moment from 'moment';           // ES6 default import
+import { format } from 'moment';       // ES6 named import
+import 'moment';                       // Side-effect import
+const moment = require('moment');       // CommonJS require
+export { default } from 'moment';      // Re-export
+import debounce from 'lodash/debounce'; // Subpath import
 ```
 
 ---
@@ -194,7 +234,7 @@ message = "All page components must wrap content in an ErrorBoundary"
 
 ### `banned-dependency` — Audit manifest files
 
-Checks `package.json`, `Cargo.toml`, `requirements.txt`, `pyproject.toml`, and `go.mod` for banned packages. Parses `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` in `package.json`; `dependencies`, `dev-dependencies`, and `build-dependencies` in `Cargo.toml`.
+Parses JSON manifest files for banned packages. By default checks `package.json`, scanning `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies`. Use the `manifest` field to check a different JSON manifest file.
 
 ```toml
 [[rule]]
@@ -202,11 +242,20 @@ id = "no-request"
 type = "banned-dependency"
 severity = "error"
 packages = ["request", "request-promise"]
-manifest = "package.json"
 message = "The 'request' package is deprecated — use 'node-fetch' or 'undici'"
 ```
 
-Omit `manifest` to check all recognized manifest files automatically.
+Specify a different manifest file:
+
+```toml
+[[rule]]
+id = "no-bootstrap-bower"
+type = "banned-dependency"
+severity = "error"
+packages = ["bootstrap"]
+manifest = "bower.json"
+message = "Remove bootstrap from bower.json"
+```
 
 ---
 
@@ -342,26 +391,129 @@ allowed_classes = ["bg-green-500", "text-red-600"]
 
 ---
 
+### `window-pattern` — Enforce proximity between patterns
+
+Checks that when a trigger pattern appears, a required pattern also appears within N lines. Useful for enforcing that certain operations always have a nearby guard, filter, or cleanup.
+
+```toml
+[[rule]]
+id = "org-scoped-queries"
+type = "window-pattern"
+severity = "error"
+pattern = "DELETE FROM"
+condition_pattern = "organizationId"
+max_count = 80
+glob = "src/**/*.ts"
+message = "DELETE queries must include organizationId within 80 lines"
+suggest = "Add WHERE organizationId = $orgId to scope the query"
+```
+
+- `pattern` — the trigger pattern to look for (literal or regex)
+- `condition_pattern` — the pattern that must appear within the window
+- `max_count` — window size in lines (how far to search after the trigger)
+- `regex` — set to `true` to treat both patterns as regex
+
+```toml
+[[rule]]
+id = "async-try-catch"
+type = "window-pattern"
+severity = "warning"
+pattern = "async ("
+condition_pattern = "try {"
+max_count = 10
+regex = true
+glob = "src/api/**/*.ts"
+message = "Async handlers should have try/catch within 10 lines"
+```
+
+---
+
 ## All Rule Config Fields
 
 | Field | Type | Used By | Description |
 |---|---|---|---|
 | `id` | string | All | Unique rule identifier |
 | `type` | string | All | Rule type (see sections above) |
-| `severity` | `error` / `warning` / `info` | All | Severity level (default: `error`) |
+| `severity` | `error` / `warning` | All | Severity level (default: `warning`) |
 | `message` | string | All | Human-readable explanation |
 | `suggest` | string | All | Fix suggestion shown in output |
-| `enabled` | bool | All | Enable/disable (default: `true`) |
 | `glob` | string | File rules | Narrow which files this rule applies to |
+| `exclude_glob` | string[] | File rules | Skip files matching these globs, even if they match `glob` |
+| `file_contains` | string | File rules | Only run this rule if the file contains this string |
+| `file_not_contains` | string | File rules | Skip this rule if the file contains this string |
 | `packages` | string[] | `banned-import`, `banned-dependency` | Package names to ban |
-| `pattern` | string | `banned-pattern`, `required-pattern`, `ratchet` | String or regex to match |
+| `pattern` | string | `banned-pattern`, `required-pattern`, `ratchet`, `window-pattern` | String or regex to match |
+| `condition_pattern` | string | `required-pattern`, `window-pattern` | Only enforce if this pattern is present |
 | `regex` | bool | Pattern rules | Treat `pattern` as regex (default: `false`) |
-| `manifest` | string | `banned-dependency` | Manifest file to check (omit for auto-detect) |
+| `manifest` | string | `banned-dependency` | Manifest file to check (default: `package.json`) |
 | `required_files` | string[] | `file-presence` | Files that must exist |
 | `forbidden_files` | string[] | `file-presence` | Files that must not exist |
-| `max_count` | int | `ratchet` | Maximum allowed occurrences |
+| `max_count` | int | `ratchet`, `window-pattern` | Maximum allowed occurrences (ratchet) or window size in lines (window-pattern) |
 | `allowed_classes` | string[] | `tailwind-dark-mode`, `tailwind-theme-tokens` | Classes exempt from checks |
 | `token_map` | string[] | `tailwind-theme-tokens` | Custom `"raw=semantic"` mappings |
+
+### Per-Rule Exclusions
+
+Any rule can use `exclude_glob` to skip specific paths, even if they match the inclusion `glob`:
+
+```toml
+[[rule]]
+id = "no-hardcoded-secrets"
+type = "banned-pattern"
+severity = "error"
+pattern = "(?i)api_key\\s*[:=]\\s*[\"'][a-zA-Z0-9_\\-]{8,}"
+regex = true
+exclude_glob = ["**/*.test.*", "**/*.spec.*"]
+message = "Hardcoded secret detected"
+```
+
+### File-Context Conditioning
+
+Rules can be conditioned on the presence (or absence) of a string in the file:
+
+```toml
+# Only flag private env vars in client components
+[[rule]]
+id = "no-private-env-client"
+type = "banned-pattern"
+severity = "error"
+pattern = "process.env.SECRET"
+file_contains = "'use client'"
+message = "Do not access private env vars in client components"
+
+# Skip generated files
+[[rule]]
+id = "no-console"
+type = "banned-pattern"
+severity = "warning"
+pattern = "console.log("
+file_not_contains = "// @generated"
+message = "Remove console.log before committing"
+```
+
+---
+
+## Escape Hatches
+
+Suppress violations with inline comments when you need to make an exception:
+
+```jsx
+{/* Same-line suppression for a specific rule */}
+<div className="bg-white"> {/* baseline:allow-enforce-dark-mode */}
+
+{/* Same-line suppression for ALL rules */}
+<div className="bg-white text-gray-900"> {/* baseline:allow-all */}
+
+{/* Next-line suppression for a specific rule */}
+{/* baseline:allow-next-line enforce-dark-mode */}
+<div className="bg-white">
+
+{/* Next-line suppression for ALL rules */}
+{/* baseline:allow-next-line all */}
+<div className="bg-white text-gray-900">
+```
+
+Works with any comment syntax (`//`, `/* */`, `{/* */}`, `#`, `<!-- -->`).
 
 ---
 
@@ -373,6 +525,7 @@ baseline <COMMAND>
 Commands:
   scan        Scan files for rule violations (primary command)
   baseline    Count ratchet pattern occurrences and write a baseline JSON file
+  ratchet     Manage ratchet rules (add, tighten, import from baseline)
   init        Generate a starter baseline.toml for your project
   mcp         Run as an MCP (Model Context Protocol) server over stdio
 ```
@@ -387,7 +540,9 @@ baseline scan [OPTIONS] [PATHS]...
       --stdin               Read file content from stdin instead of disk
       --filename <NAME>     Filename to use for glob matching when using --stdin
       --changed-only        Only scan files changed relative to a base branch (requires git)
-      --base <REF>          Base ref for --changed-only [default: auto-detect or "main"]
+      --base <REF>          Base ref for --changed-only [default: auto-detect from CI or "main"]
+                            Auto-detects: GITHUB_BASE_REF, CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+                            (GitLab), BITBUCKET_PR_DESTINATION_BRANCH (Bitbucket)
       --fix                 Apply fixes automatically
       --dry-run             Preview fixes without applying (requires --fix)
 ```
@@ -409,6 +564,56 @@ baseline init [OPTIONS]
   -o, --output <PATH>       Output file [default: baseline.toml]
       --force               Overwrite existing config file
 ```
+
+The `init` command auto-detects your project type and generates an appropriate starter config:
+- **shadcn + Tailwind** (detected via `components.json`) — uses `extends = ["shadcn-strict"]`
+- **Tailwind CSS** (detected via `tailwind.config.*`) — includes Tailwind-specific rules
+- **Generic** — generates example rules as comments
+
+### `ratchet` subcommands
+
+Helpers for managing ratchet rules without editing TOML by hand.
+
+```
+baseline ratchet add <PATTERN> [OPTIONS] [PATHS]...
+
+  --id <ID>                 Custom rule ID (default: slugified pattern)
+  --glob <GLOB>             File glob filter [default: **/*]
+  --regex                   Treat pattern as regex
+  --message <MSG>           Custom message
+  -c, --config <PATH>       Config file path [default: baseline.toml]
+```
+
+Counts current occurrences and appends a new `[[rule]]` with `type = "ratchet"` and `max_count` set to the current count.
+
+```
+baseline ratchet down <RULE_ID> [OPTIONS] [PATHS]...
+
+  -c, --config <PATH>       Config file path [default: baseline.toml]
+```
+
+Re-counts occurrences and lowers `max_count` in-place. Use after migrating call sites.
+
+```
+baseline ratchet from <BASELINE_JSON> [OPTIONS]
+
+  -c, --config <PATH>       Config file path [default: baseline.toml]
+```
+
+Creates ratchet rules from a `.baseline-snapshot.json` file (output of `baseline baseline`).
+
+### `mcp` options
+
+```
+baseline mcp [OPTIONS]
+
+  -c, --config <PATH>       Config file path [default: baseline.toml]
+```
+
+Runs a JSON-RPC 2.0 MCP server over stdio (protocol version `2024-11-05`). Exposes two tools:
+
+- **`baseline_scan`** — scan files or inline content for violations. Accepts `paths` (array) or `content` + `filename` (string).
+- **`baseline_list_rules`** — list all configured rules with id, type, severity, glob, and message.
 
 ### Output Formats
 
@@ -499,10 +704,10 @@ src/
 └── rules/
     ├── mod.rs                      Rule trait, Violation type, rule registry
     ├── factory.rs                  Rule construction from config
-    ├── banned_import.rs            Import detection (JS/TS/Python/Rust)
+    ├── banned_import.rs            Import detection (JS/TS)
     ├── banned_pattern.rs           Literal + regex pattern matching
     ├── required_pattern.rs         Ensure patterns exist in matching files
-    ├── banned_dependency.rs        Manifest parsing (package.json, Cargo.toml, etc.)
+    ├── banned_dependency.rs        Manifest parsing (package.json)
     ├── file_presence.rs            Required/forbidden file checks
     ├── ratchet.rs                  Decreasing-count enforcement
     ├── window_pattern.rs           Sliding-window pattern matching
@@ -512,6 +717,7 @@ src/
 examples/
 ├── baseline.toml                   Sample project config
 ├── baseline.example.toml           Documented reference for all rule types
+├── plugin-react-rules.toml         Example plugin file with React rules
 ├── github-ci.yml                   GitHub Actions workflow example
 ├── claude-code-hooks.json          Claude Code hooks integration
 ├── BadCard.tsx                     Anti-pattern example — hardcoded colors
@@ -524,29 +730,25 @@ The `Rule` trait defines the interface:
 
 ```rust
 pub trait Rule: Send + Sync {
+    /// Unique identifier for this rule (e.g. "tailwind-dark-mode").
     fn id(&self) -> &str;
+
+    /// Severity level reported when the rule fires.
     fn severity(&self) -> Severity;
 
-    /// Check a single file. Called for each file matching the glob.
-    fn check_file(&self, ctx: &ScanContext) -> Vec<Violation>;
-
-    /// Check the project as a whole (manifests, file presence, ratchet totals).
-    fn check_project(&self, root: &Path) -> Vec<Violation>;
-
-    /// Whether this rule scans individual files.
-    fn is_file_rule(&self) -> bool;
-
-    /// Optional glob to narrow file matching beyond the global include/exclude.
+    /// Optional glob pattern restricting which files are scanned.
     fn file_glob(&self) -> Option<&str>;
+
+    /// Scan a single file and return any violations found.
+    fn check_file(&self, ctx: &ScanContext) -> Vec<Violation>;
 }
 ```
 
 To add a new rule:
 
 1. Create `src/rules/your_rule.rs` implementing the `Rule` trait.
-2. Add a variant to `RuleType` in `src/config.rs`.
-3. Register it in `build_rule()` in `src/rules/factory.rs`.
-4. Add any new config fields to `RuleConfig` in `src/config.rs`.
+2. Register it in `build_rule()` in `src/rules/factory.rs` (rule types are matched as strings).
+3. Add any new config fields to `RuleConfig` in `src/config.rs` and `TomlRule` in `src/cli/toml_config.rs`.
 
 ---
 

@@ -5,7 +5,8 @@
 name = "my-project"
 
 # Presets: load a curated set of rules in one line.
-# Available presets: "shadcn-strict", "shadcn-migrate", "ai-safety"
+# Available presets: "shadcn-strict", "shadcn-migrate", "ai-safety",
+#                    "security", "nextjs", "ai-codegen"
 # Any [[rule]] with the same id as a preset rule overrides it.
 # extends = ["shadcn-strict"]
 

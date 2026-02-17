@@ -20,21 +20,14 @@ inputs:
   base:
     description: 'Base ref for changed-only diff (default: auto-detect from GITHUB_BASE_REF)'
     required: false
-  fail-on-warning:
-    description: 'Fail the check if warnings are found'
-    required: false
-    default: 'false'
   version:
     description: 'Version of baseline to install'
     required: false
     default: 'latest'
 
 outputs:
-  errors:
-    description: 'Number of errors found'
-    value: ${{ steps.scan.outputs.errors }}
   exit-code:
-    description: 'Exit code from the scan (0 = clean, 1 = violations)'
+    description: 'Exit code from the scan (0 = clean, 1 = violations, 2 = config error)'
     value: ${{ steps.scan.outputs.exit_code }}
 
 runs:
