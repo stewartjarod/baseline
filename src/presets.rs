@@ -35,6 +35,8 @@ enum Preset {
     Security,
     Nextjs,
     AiCodegen,
+    React,
+    NextjsBestPractices,
 }
 
 /// Returns the list of all available preset names.
@@ -46,6 +48,8 @@ pub fn available_presets() -> &'static [&'static str] {
         "security",
         "nextjs",
         "ai-codegen",
+        "react",
+        "nextjs-best-practices",
     ]
 }
 
@@ -57,6 +61,8 @@ fn resolve_preset(name: &str) -> Option<Preset> {
         "security" => Some(Preset::Security),
         "nextjs" => Some(Preset::Nextjs),
         "ai-codegen" => Some(Preset::AiCodegen),
+        "react" => Some(Preset::React),
+        "nextjs-best-practices" => Some(Preset::NextjsBestPractices),
         _ => None,
     }
 }
@@ -356,6 +362,312 @@ fn preset_rules(preset: Preset) -> Vec<TomlRule> {
                 regex: true,
                 message: "Use next/font instead of Google Fonts <link> for zero layout shift".into(),
                 suggest: Some("Import from 'next/font/google' for automatic font optimization".into()),
+                ..Default::default()
+            },
+        ],
+        Preset::React => vec![
+            // ── Correctness ──────────────────────────────────────────
+            TomlRule {
+                id: "no-array-index-key".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"key=\{[a-zA-Z_]*[iI](?:ndex|dx)".into()),
+                regex: true,
+                message: "Don't use array index as key — causes bugs on reorder/filter".into(),
+                suggest: Some("Use a stable unique identifier from the data instead".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-conditional-render-zero".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"\{\s*\w+\.length\s*&&".into()),
+                regex: true,
+                message: "array.length && <JSX> renders '0' when empty — use array.length > 0".into(),
+                suggest: Some("Replace {arr.length && ...} with {arr.length > 0 && ...}".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-nested-component-def".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"^\s+(?:const|let|function)\s+[A-Z][a-zA-Z0-9]*\s*(?::\s*React\.FC|=\s*(?:\([^)]*\)|[a-zA-Z_]\w*)\s*(?::\s*[A-Za-z<>\[\]|&, ]+)?\s*=>|=\s*function|\()".into()),
+                regex: true,
+                message: "Component defined inside another component — causes remounting on every render".into(),
+                suggest: Some("Move component definition to module scope or extract to a separate file".into()),
+                ..Default::default()
+            },
+            // ── Security ─────────────────────────────────────────────
+            TomlRule {
+                id: "no-dangerous-html".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some("dangerouslySetInnerHTML".into()),
+                message: "dangerouslySetInnerHTML can lead to XSS — sanitize content or use a safe alternative".into(),
+                ..Default::default()
+            },
+            // ── Performance: bundle size ─────────────────────────────
+            TomlRule {
+                id: "no-full-lodash-import".into(),
+                rule_type: "banned-import".into(),
+                severity: "warning".into(),
+                packages: vec!["lodash".into()],
+                message: "Importing all of lodash (~70kb) — use lodash-es or per-function imports like lodash/debounce".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-moment".into(),
+                rule_type: "banned-import".into(),
+                severity: "warning".into(),
+                packages: vec!["moment".into(), "moment-timezone".into()],
+                message: "moment.js is 300kb+ and deprecated — use date-fns, dayjs, or Temporal API".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-moment-dep".into(),
+                rule_type: "banned-dependency".into(),
+                severity: "warning".into(),
+                packages: vec!["moment".into(), "moment-timezone".into()],
+                message: "moment.js is 300kb+ and deprecated — use date-fns, dayjs, or Temporal API".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-new-function".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                pattern: Some(r"\bnew\s+Function\s*\(".into()),
+                regex: true,
+                message: "new Function() is equivalent to eval() — avoid dynamic code execution".into(),
+                ..Default::default()
+            },
+            // ── Performance: rendering ───────────────────────────────
+            TomlRule {
+                id: "no-transition-all".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r#"transition:\s*["']all"#.into()),
+                regex: true,
+                message: "transition: 'all' is expensive — list specific properties to transition".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-layout-animation".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx,css}".into()),
+                pattern: Some(r"(?:animation|transition)(?:-property)?:\s*(?:.*\b(?:width|height|top|left|right|bottom|margin|padding)\b)".into()),
+                regex: true,
+                message: "Animating layout properties (width/height/margin) triggers expensive reflows — use transform instead".into(),
+                suggest: Some("Use transform: scale() or translate() for smooth GPU-accelerated animations".into()),
+                ..Default::default()
+            },
+            // ── State & Effects ──────────────────────────────────────
+            TomlRule {
+                id: "no-fetch-in-effect".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"useEffect\([^)]*\(\)\s*(?:=>)?\s*\{[^}]*\bfetch\s*\(".into()),
+                regex: true,
+                message: "Avoid fetch() inside useEffect — use a data-fetching library (React Query, SWR) or server components".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-lazy-state-init".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"useState\(\w+\(.*\)\)".into()),
+                regex: true,
+                message: "Expensive function call in useState runs every render — use lazy initializer: useState(() => fn())".into(),
+                suggest: Some("Wrap in a function: useState(() => computeValue()) for one-time initialization".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-object-dep-array".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"(?:useEffect|useMemo|useCallback)\([^)]+,\s*\[[^\]]*(?:\{[^}]*\}|\[[^\]]*\])".into()),
+                regex: true,
+                message: "Object/array literal in dependency array creates a new reference every render — extract to useMemo or a ref".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-default-object-prop".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"(?:function\s+[A-Z]|const\s+[A-Z]\w*\s*=)\s*.*(?:\{\s*\w+\s*=\s*(?:\{\}|\[\])\s*[,}])".into()),
+                regex: true,
+                message: "Default {} or [] in component params creates a new reference every render — extract to a module-level constant".into(),
+                ..Default::default()
+            },
+        ],
+        Preset::NextjsBestPractices => vec![
+            // ── Images & Media ───────────────────────────────────────
+            TomlRule {
+                id: "use-next-image".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"<img\s".into()),
+                regex: true,
+                exclude_glob: vec!["**/opengraph-image.*".into(), "**/og/**".into()],
+                message: "Use next/image instead of <img> for automatic optimization".into(),
+                suggest: Some("Import Image from 'next/image' and use <Image> component".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "next-image-fill-needs-sizes".into(),
+                rule_type: "window-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"<Image[^>]*\bfill\b".into()),
+                condition_pattern: Some(r"\bsizes\s*=".into()),
+                max_count: Some(3),
+                regex: true,
+                message: "<Image fill> without sizes attribute downloads unnecessarily large images".into(),
+                suggest: Some("Add sizes prop, e.g. sizes=\"(max-width: 768px) 100vw, 50vw\"".into()),
+                ..Default::default()
+            },
+            // ── Routing & Navigation ─────────────────────────────────
+            TomlRule {
+                id: "use-next-link".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r#"<a\s+href=["']/"#.into()),
+                regex: true,
+                message: "Use next/link instead of <a> for client-side navigation".into(),
+                suggest: Some("Import Link from 'next/link' and use <Link> component".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-next-router-in-app".into(),
+                rule_type: "banned-import".into(),
+                severity: "error".into(),
+                glob: Some("app/**".into()),
+                packages: vec!["next/router".into()],
+                message: "next/router is not available in App Router — use next/navigation instead".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-next-head".into(),
+                rule_type: "banned-import".into(),
+                severity: "error".into(),
+                glob: Some("app/**".into()),
+                packages: vec!["next/head".into()],
+                message: "next/head is not supported in App Router — use the Metadata API instead".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-client-side-redirect".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"useEffect\([^)]*\(\)\s*(?:=>)?\s*\{[^}]*(?:router\.push|window\.location)".into()),
+                regex: true,
+                message: "Avoid client-side redirects in useEffect — use server-side redirect() or middleware".into(),
+                suggest: Some("Move redirect logic to middleware.ts or use redirect() in a server component".into()),
+                ..Default::default()
+            },
+            // ── Scripts & Fonts ──────────────────────────────────────
+            TomlRule {
+                id: "no-sync-scripts".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"<script\s".into()),
+                regex: true,
+                message: "Use next/script instead of <script> for optimized script loading".into(),
+                suggest: Some("Import Script from 'next/script' and use <Script> component".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-link-fonts".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"<link[^>]*fonts\.googleapis\.com".into()),
+                regex: true,
+                message: "Use next/font instead of Google Fonts <link> for zero layout shift".into(),
+                suggest: Some("Import from 'next/font/google' for automatic font optimization".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-css-link".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r#"<link[^>]*rel=["']stylesheet["']"#.into()),
+                regex: true,
+                message: "Import CSS files directly instead of using <link rel=\"stylesheet\">".into(),
+                suggest: Some("Use import './styles.css' for automatic bundling and optimization".into()),
+                ..Default::default()
+            },
+            // ── Server/Client Boundary ───────────────────────────────
+            TomlRule {
+                id: "no-private-env-client".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                glob: Some("**/*.{ts,tsx,js,jsx}".into()),
+                pattern: Some(r"process\.env\.(?:[A-MO-Za-z_]\w*|N[A-DF-Za-z0-9_]\w*|NE[A-WYZa-z0-9_]\w*|NEX[A-SU-Za-z0-9_]\w*|NEXT[A-Za-z0-9]\w*|NEXT_[A-OQ-Za-z0-9_]\w*|NEXT_P[A-TV-Za-z0-9_]\w*|NEXT_PU[A-AC-Za-z0-9_]\w*|NEXT_PUB[A-KM-Za-z0-9_]\w*|NEXT_PUBL[A-HJ-Za-z0-9_]\w*|NEXT_PUBLI[A-BD-Za-z0-9_]\w*|NEXT_PUBLIC[A-Za-z0-9]\w*)".into()),
+                regex: true,
+                file_contains: Some("use client".into()),
+                message: "Private env vars are undefined in client components — prefix with NEXT_PUBLIC_".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "require-use-client-for-hooks".into(),
+                rule_type: "required-pattern".into(),
+                severity: "error".into(),
+                glob: Some("app/**".into()),
+                pattern: Some("use client".into()),
+                regex: true,
+                condition_pattern: Some(r"use(State|Effect|Context|Reducer|Callback|Memo|Ref|Transition|DeferredValue|InsertionEffect|SyncExternalStore|FormStatus|Optimistic)\s*\(".into()),
+                message: "Files using React hooks must include 'use client' directive in App Router".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-async-client-component".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"(?:export\s+default\s+)?async\s+function\s+[A-Z]".into()),
+                regex: true,
+                file_contains: Some("use client".into()),
+                message: "Client components cannot be async — only server components support async/await".into(),
+                suggest: Some("Remove 'use client' to make this a server component, or remove async and use useEffect for data fetching".into()),
+                ..Default::default()
+            },
+            // ── SEO ──────────────────────────────────────────────────
+            TomlRule {
+                id: "require-metadata-in-pages".into(),
+                rule_type: "required-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("app/**/page.{ts,tsx,js,jsx}".into()),
+                pattern: Some(r"(?:export\s+(?:const\s+metadata|(?:async\s+)?function\s+generateMetadata))".into()),
+                regex: true,
+                message: "Page files should export metadata or generateMetadata for SEO".into(),
+                suggest: Some("Add: export const metadata = { title: '...', description: '...' }".into()),
+                ..Default::default()
+            },
+            // ── Server Actions ───────────────────────────────────────
+            TomlRule {
+                id: "no-redirect-in-try-catch".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "error".into(),
+                glob: Some("**/*.{ts,tsx,js,jsx}".into()),
+                pattern: Some(r"try\s*\{[^}]*\bredirect\s*\(".into()),
+                regex: true,
+                message: "redirect() throws a special error — calling it inside try/catch will swallow the redirect".into(),
+                suggest: Some("Move redirect() outside the try/catch block".into()),
                 ..Default::default()
             },
         ],
@@ -704,6 +1016,48 @@ mod tests {
         assert!(ids.contains(&"no-var"));
         assert!(ids.contains(&"no-require-in-ts"));
         assert!(ids.contains(&"no-non-null-assertion"));
+    }
+
+    #[test]
+    fn react_has_fourteen_rules() {
+        let rules = preset_rules(Preset::React);
+        assert_eq!(rules.len(), 14);
+        let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
+        assert!(ids.contains(&"no-array-index-key"));
+        assert!(ids.contains(&"no-conditional-render-zero"));
+        assert!(ids.contains(&"no-nested-component-def"));
+        assert!(ids.contains(&"no-dangerous-html"));
+        assert!(ids.contains(&"no-full-lodash-import"));
+        assert!(ids.contains(&"no-moment"));
+        assert!(ids.contains(&"no-moment-dep"));
+        assert!(ids.contains(&"no-new-function"));
+        assert!(ids.contains(&"no-transition-all"));
+        assert!(ids.contains(&"no-layout-animation"));
+        assert!(ids.contains(&"no-fetch-in-effect"));
+        assert!(ids.contains(&"no-lazy-state-init"));
+        assert!(ids.contains(&"no-object-dep-array"));
+        assert!(ids.contains(&"no-default-object-prop"));
+    }
+
+    #[test]
+    fn nextjs_best_practices_has_fourteen_rules() {
+        let rules = preset_rules(Preset::NextjsBestPractices);
+        assert_eq!(rules.len(), 14);
+        let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
+        assert!(ids.contains(&"use-next-image"));
+        assert!(ids.contains(&"next-image-fill-needs-sizes"));
+        assert!(ids.contains(&"use-next-link"));
+        assert!(ids.contains(&"no-next-router-in-app"));
+        assert!(ids.contains(&"no-next-head"));
+        assert!(ids.contains(&"no-client-side-redirect"));
+        assert!(ids.contains(&"no-sync-scripts"));
+        assert!(ids.contains(&"no-link-fonts"));
+        assert!(ids.contains(&"no-css-link"));
+        assert!(ids.contains(&"no-private-env-client"));
+        assert!(ids.contains(&"require-use-client-for-hooks"));
+        assert!(ids.contains(&"no-async-client-component"));
+        assert!(ids.contains(&"require-metadata-in-pages"));
+        assert!(ids.contains(&"no-redirect-in-try-catch"));
     }
 
     #[test]

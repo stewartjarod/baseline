@@ -36,7 +36,7 @@ Baseline is a code quality enforcement tool that lints React/TypeScript projects
 
 **Tailwind class extraction**: Both Tailwind rules detect classes from `className=`, `class=`, and utility function calls (`cn()`, `clsx()`, `classNames()`, `cva()`, `twMerge()`). They skip `dark:`, `hover:`, and `focus:` prefixed classes.
 
-**Six built-in presets** (`src/presets.rs`): `shadcn-strict`, `shadcn-migrate`, `ai-safety`, `security`, `nextjs`, `ai-codegen`.
+**Eight built-in presets** (`src/presets.rs`): `shadcn-strict`, `shadcn-migrate`, `ai-safety`, `security`, `nextjs`, `ai-codegen`, `react`, `nextjs-best-practices`.
 
 ## Configuration
 
