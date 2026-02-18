@@ -1,5 +1,13 @@
 # Changelog
 
+## [v1.5.1] - 2026-02-18
+
+### Bug Fixes
+- Fix HTML-tag rule false positives on template literal strings: add `skip_strings` to use-next-image, use-next-link, no-sync-scripts, no-link-fonts, no-css-link (ba8f136)
+
+### Other
+- Fix claude-code-hooks example: use correct hook format, parse file path from stdin (d2c4fe8)
+
 ## [v1.5.0] - 2026-02-18
 
 ### Features

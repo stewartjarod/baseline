@@ -1,6 +1,6 @@
 {
   "name": "@code-baseline/cli-win32-x64",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Baseline CLI binary for Windows x64",
   "license": "MIT",
   "repository": {
