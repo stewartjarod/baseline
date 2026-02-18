@@ -1,5 +1,11 @@
 # Changelog
 
+## [v1.4.1] - 2026-02-17
+
+### Other
+- remove `ast` feature flag: tree-sitter now built in unconditionally — `skip_strings` and AST rules work for all users including npm/npx (b2cf187)
+- update logo (c45d786)
+
 ## [v1.4.0] - 2026-02-17
 
 ### Features

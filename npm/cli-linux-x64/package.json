@@ -1,6 +1,6 @@
 {
   "name": "@code-baseline/cli-linux-x64",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Baseline CLI binary for Linux x64",
   "license": "MIT",
   "repository": {
