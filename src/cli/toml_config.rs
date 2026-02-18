@@ -12,10 +12,43 @@ pub struct TomlConfig {
 /// A `[[baseline.scoped]]` entry that applies a preset to a specific directory.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ScopedPreset {
-    pub preset: String,
+    #[serde(deserialize_with = "string_or_vec")]
+    pub preset: Vec<String>,
     pub path: String,
     #[serde(default)]
     pub exclude_rules: Vec<String>,
+}
+
+/// Deserialize a TOML value that is either a single string or an array of strings.
+fn string_or_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+
+    struct StringOrVec;
+
+    impl<'de> de::Visitor<'de> for StringOrVec {
+        type Value = Vec<String>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a string or array of strings")
+        }
+
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            Ok(vec![v.to_owned()])
+        }
+
+        fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            let mut v = Vec::new();
+            while let Some(s) = seq.next_element()? {
+                v.push(s);
+            }
+            Ok(v)
+        }
+    }
+
+    deserializer.deserialize_any(StringOrVec)
 }
 
 /// The `[baseline]` section.

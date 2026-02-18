@@ -139,6 +139,25 @@ Available presets:
 | `accessibility` | 9 | AST-powered: div/span click handlers without role, outline-none without focus-visible ring, no user-scalable=no, no unrestricted autoFocus, no transition-all, no hardcoded date formats, no onclick navigation, require img alt |
 | `react-native` | 13 | No deprecated Touchable*, no legacy shadows, use expo-image, no custom headers, no useFonts/loadAsync, no inline Intl formatters, use native navigators, no JS bottom sheet |
 
+### Scoped Presets (Monorepos)
+
+Apply different presets to different directories in a monorepo. The `preset` field accepts a single string or an array of strings:
+
+```toml
+[baseline]
+extends = ["react", "security"]   # applied globally
+
+[[baseline.scoped]]
+preset = ["nextjs", "shadcn-strict"]
+path = "apps/web"
+
+[[baseline.scoped]]
+preset = "react-native"
+path = "apps/mobile"
+```
+
+Rule globs are automatically prefixed with `path`, so preset rules only match files under that directory. Use `exclude_rules` to skip specific rules from a scoped preset.
+
 ### Plugins
 
 Load additional rules from external TOML files:
@@ -1003,7 +1022,6 @@ message = "Migrate to newApi.request()"
 
 - **WASM plugin system** — distribute custom rules as portable WASM modules
 - **Watch mode** — re-run on file changes during development
-- **Monorepo support** — per-package config inheritance with shared base rules
 
 ## Inspiration
 

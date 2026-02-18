@@ -1434,8 +1434,9 @@ pub fn resolve_scoped_rules(
     let mut result: Vec<TomlRule> = Vec::new();
 
     for entry in scoped {
-        let preset = resolve_preset(&entry.preset).ok_or_else(|| PresetError::UnknownPreset {
-            name: entry.preset.clone(),
+        for preset_name in &entry.preset {
+        let preset = resolve_preset(preset_name).ok_or_else(|| PresetError::UnknownPreset {
+            name: preset_name.clone(),
             available: available_presets().to_vec(),
         })?;
 
@@ -1477,6 +1478,7 @@ pub fn resolve_scoped_rules(
 
             result.push(rule);
         }
+        } // for preset_name
     }
 
     Ok(result)
@@ -2397,7 +2399,7 @@ mod tests {
     #[test]
     fn resolve_scoped_rules_prefixes_globs() {
         let scoped = vec![ScopedPreset {
-            preset: "nextjs".into(),
+            preset: vec!["nextjs".into()],
             path: "apps/web".into(),
             exclude_rules: vec![],
         }];
@@ -2416,7 +2418,7 @@ mod tests {
     fn resolve_scoped_rules_none_glob_gets_catch_all() {
         // ai-safety has banned-dependency rules with no glob
         let scoped = vec![ScopedPreset {
-            preset: "ai-safety".into(),
+            preset: vec!["ai-safety".into()],
             path: "packages/core".into(),
             exclude_rules: vec![],
         }];
@@ -2434,7 +2436,7 @@ mod tests {
     #[test]
     fn resolve_scoped_rules_user_override_skips_rule() {
         let scoped = vec![ScopedPreset {
-            preset: "nextjs".into(),
+            preset: vec!["nextjs".into()],
             path: "apps/web".into(),
             exclude_rules: vec![],
         }];
@@ -2458,7 +2460,7 @@ mod tests {
             resolve_rules(&["security".to_string()], &[]).unwrap();
         let scoped = resolve_scoped_rules(
             &[ScopedPreset {
-                preset: "nextjs".into(),
+                preset: vec!["nextjs".into()],
                 path: "apps/web".into(),
                 exclude_rules: vec![],
             }],
@@ -2478,7 +2480,7 @@ mod tests {
     #[test]
     fn resolve_scoped_unknown_preset_errors() {
         let scoped = vec![ScopedPreset {
-            preset: "nonexistent".into(),
+            preset: vec!["nonexistent".into()],
             path: "apps/web".into(),
             exclude_rules: vec![],
         }];
@@ -2492,7 +2494,7 @@ mod tests {
     fn resolve_scoped_prefixes_file_presence_paths() {
         // security preset has file-presence rules with forbidden_files
         let scoped = vec![ScopedPreset {
-            preset: "security".into(),
+            preset: vec!["security".into()],
             path: "apps/api".into(),
             exclude_rules: vec![],
         }];
@@ -2510,7 +2512,7 @@ mod tests {
     fn resolve_scoped_prefixes_exclude_glob() {
         // security preset's no-console-log has exclude_glob
         let scoped = vec![ScopedPreset {
-            preset: "security".into(),
+            preset: vec!["security".into()],
             path: "apps/api".into(),
             exclude_rules: vec![],
         }];
@@ -2527,7 +2529,7 @@ mod tests {
     #[test]
     fn resolve_scoped_exclude_rules_skips_listed() {
         let scoped = vec![ScopedPreset {
-            preset: "nextjs".into(),
+            preset: vec!["nextjs".into()],
             path: "apps/web".into(),
             exclude_rules: vec!["use-next-image".into()],
         }];
@@ -2546,12 +2548,12 @@ mod tests {
     #[test]
     fn resolve_scoped_exclude_rules_empty_is_noop() {
         let scoped_empty = vec![ScopedPreset {
-            preset: "nextjs".into(),
+            preset: vec!["nextjs".into()],
             path: "apps/web".into(),
             exclude_rules: vec![],
         }];
         let scoped_none = vec![ScopedPreset {
-            preset: "nextjs".into(),
+            preset: vec!["nextjs".into()],
             path: "apps/web".into(),
             exclude_rules: vec![],
         }];
@@ -2560,5 +2562,26 @@ mod tests {
         let ids_empty: Vec<&str> = rules_empty.iter().map(|r| r.id.as_str()).collect();
         let ids_none: Vec<&str> = rules_none.iter().map(|r| r.id.as_str()).collect();
         assert_eq!(ids_empty, ids_none, "empty exclude_rules should be a no-op");
+    }
+
+    #[test]
+    fn resolve_scoped_multi_preset_array() {
+        let scoped = vec![ScopedPreset {
+            preset: vec!["nextjs".into(), "security".into()],
+            path: "apps/web".into(),
+            exclude_rules: vec![],
+        }];
+        let rules = resolve_scoped_rules(&scoped, &[]).unwrap();
+        // Should contain rules from both presets
+        assert!(rules.iter().any(|r| r.id == "use-next-image"), "missing nextjs rule");
+        assert!(rules.iter().any(|r| r.id == "no-eval"), "missing security rule");
+        // All should be scoped
+        for rule in &rules {
+            let glob = rule.glob.as_ref().unwrap();
+            assert!(
+                glob.starts_with("apps/web/"),
+                "expected glob to start with 'apps/web/', got: {glob}"
+            );
+        }
     }
 }

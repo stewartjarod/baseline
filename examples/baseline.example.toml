@@ -37,6 +37,11 @@ exclude = [
 # preset = "nextjs"
 # path = "apps/web"
 #
+# Multiple presets can be combined in a single entry:
+# [[baseline.scoped]]
+# preset = ["nextjs", "shadcn-strict"]
+# path = "apps/web"
+#
 # [[baseline.scoped]]
 # preset = "react-native"
 # path = "apps/mobile"
