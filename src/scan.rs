@@ -309,11 +309,19 @@ pub fn run_scan(config_path: &Path, target_paths: &[PathBuf]) -> Result<ScanResu
     let mut all_user_rules = toml_config.rule.clone();
     all_user_rules.extend(plugin_rules);
 
-    let resolved_rules = presets::resolve_rules(
+    let mut resolved_rules = presets::resolve_rules(
         &toml_config.baseline.extends,
         &all_user_rules,
     )
     .map_err(ScanError::Preset)?;
+
+    // 3b. Resolve scoped presets and append
+    let scoped_rules = presets::resolve_scoped_rules(
+        &toml_config.baseline.scoped,
+        &all_user_rules,
+    )
+    .map_err(ScanError::Preset)?;
+    resolved_rules.extend(scoped_rules);
 
     // 4. Build exclude glob set
     let exclude_set = build_glob_set(&toml_config.baseline.exclude)?;
@@ -427,11 +435,18 @@ pub fn run_scan_stdin(
     let config_text = fs::read_to_string(config_path).map_err(ScanError::ConfigRead)?;
     let toml_config: TomlConfig = toml::from_str(&config_text).map_err(ScanError::ConfigParse)?;
 
-    let resolved_rules = presets::resolve_rules(
+    let mut resolved_rules = presets::resolve_rules(
         &toml_config.baseline.extends,
         &toml_config.rule,
     )
     .map_err(ScanError::Preset)?;
+
+    let scoped_rules = presets::resolve_scoped_rules(
+        &toml_config.baseline.scoped,
+        &toml_config.rule,
+    )
+    .map_err(ScanError::Preset)?;
+    resolved_rules.extend(scoped_rules);
 
     let built = build_rules(&resolved_rules)?;
     let rules_loaded: usize = built.rule_groups.iter().map(|g| g.rules.len()).sum();
@@ -506,11 +521,18 @@ pub fn run_baseline(
     let toml_config: TomlConfig = toml::from_str(&config_text).map_err(ScanError::ConfigParse)?;
 
     // Resolve presets and merge with user-defined rules
-    let resolved_rules = presets::resolve_rules(
+    let mut resolved_rules = presets::resolve_rules(
         &toml_config.baseline.extends,
         &toml_config.rule,
     )
     .map_err(ScanError::Preset)?;
+
+    let scoped_rules = presets::resolve_scoped_rules(
+        &toml_config.baseline.scoped,
+        &toml_config.rule,
+    )
+    .map_err(ScanError::Preset)?;
+    resolved_rules.extend(scoped_rules);
 
     let exclude_set = build_glob_set(&toml_config.baseline.exclude)?;
 

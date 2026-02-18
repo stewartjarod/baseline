@@ -240,7 +240,7 @@ fn handle_list_rules(
         }
     };
 
-    let resolved = match presets::resolve_rules(&toml_config.baseline.extends, &toml_config.rule) {
+    let mut resolved = match presets::resolve_rules(&toml_config.baseline.extends, &toml_config.rule) {
         Ok(r) => r,
         Err(e) => {
             return json!({
@@ -253,6 +253,20 @@ fn handle_list_rules(
             });
         }
     };
+
+    match presets::resolve_scoped_rules(&toml_config.baseline.scoped, &toml_config.rule) {
+        Ok(scoped) => resolved.extend(scoped),
+        Err(e) => {
+            return json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "content": [{ "type": "text", "text": format!("Error resolving scoped rules: {}", e) }],
+                    "isError": true
+                }
+            });
+        }
+    }
 
     let rules: Vec<serde_json::Value> = resolved
         .iter()

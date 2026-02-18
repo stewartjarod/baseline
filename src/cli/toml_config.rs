@@ -9,6 +9,13 @@ pub struct TomlConfig {
     pub rule: Vec<TomlRule>,
 }
 
+/// A `[[baseline.scoped]]` entry that applies a preset to a specific directory.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScopedPreset {
+    pub preset: String,
+    pub path: String,
+}
+
 /// The `[baseline]` section.
 #[derive(Debug, Deserialize)]
 pub struct BaselineSection {
@@ -23,6 +30,9 @@ pub struct BaselineSection {
     /// Paths to plugin TOML files containing additional rules
     #[serde(default)]
     pub plugins: Vec<String>,
+    /// Scoped presets: apply a preset only to files under a specific path
+    #[serde(default)]
+    pub scoped: Vec<ScopedPreset>,
 }
 
 /// A single `[[rule]]` entry.

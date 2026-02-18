@@ -7,7 +7,7 @@ name = "my-project"
 # Presets: load a curated set of rules in one line.
 # Available presets: "shadcn-strict", "shadcn-migrate", "ai-safety",
 #                    "security", "nextjs", "ai-codegen", "react",
-#                    "nextjs-best-practices"
+#                    "nextjs-best-practices", "accessibility", "react-native"
 # Any [[rule]] with the same id as a preset rule overrides it.
 # extends = ["shadcn-strict"]
 
@@ -27,6 +27,19 @@ exclude = [
 
 # Plugin files: load additional rules from external TOML files
 # plugins = ["./plugins/react-rules.toml", "./plugins/security-rules.toml"]
+
+# Scoped presets: apply a preset only to files under a specific path.
+# Useful for monorepos where different apps need different presets.
+# Each [[baseline.scoped]] entry takes a preset name and a directory path.
+# Rule globs are automatically prefixed with the path.
+#
+# [[baseline.scoped]]
+# preset = "nextjs"
+# path = "apps/web"
+#
+# [[baseline.scoped]]
+# preset = "react-native"
+# path = "apps/mobile"
 
 
 # ══════════════════════════════════════════════

@@ -1,4 +1,4 @@
-use crate::cli::toml_config::TomlRule;
+use crate::cli::toml_config::{ScopedPreset, TomlRule};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -1391,6 +1391,64 @@ pub fn resolve_rules(
     Ok(merge_rules(all_preset_rules, user_rules))
 }
 
+/// Prefix a glob pattern with a scoped path.
+/// Strips a leading `**/` if present so patterns like `**/*.tsx` become `{path}/**/*.tsx`.
+fn scope_glob(path: &str, glob: &str) -> String {
+    let stripped = glob.strip_prefix("**/").unwrap_or(glob);
+    format!("{path}/{stripped}")
+}
+
+/// Resolve scoped presets and return rules with globs prefixed to the scoped path.
+pub fn resolve_scoped_rules(
+    scoped: &[ScopedPreset],
+    user_rules: &[TomlRule],
+) -> Result<Vec<TomlRule>, PresetError> {
+    let mut result: Vec<TomlRule> = Vec::new();
+
+    for entry in scoped {
+        let preset = resolve_preset(&entry.preset).ok_or_else(|| PresetError::UnknownPreset {
+            name: entry.preset.clone(),
+            available: available_presets().to_vec(),
+        })?;
+
+        for mut rule in preset_rules(preset) {
+            // Prefix glob
+            rule.glob = Some(match rule.glob {
+                Some(g) => scope_glob(&entry.path, &g),
+                None => format!("{}/**", entry.path),
+            });
+
+            // Prefix exclude_glob entries
+            rule.exclude_glob = rule
+                .exclude_glob
+                .iter()
+                .map(|g| scope_glob(&entry.path, g))
+                .collect();
+
+            // Prefix file-presence paths
+            rule.required_files = rule
+                .required_files
+                .iter()
+                .map(|f| format!("{}/{f}", entry.path))
+                .collect();
+            rule.forbidden_files = rule
+                .forbidden_files
+                .iter()
+                .map(|f| format!("{}/{f}", entry.path))
+                .collect();
+
+            // User rules with the same id override scoped preset rules
+            if user_rules.iter().any(|u| u.id == rule.id) {
+                continue;
+            }
+
+            result.push(rule);
+        }
+    }
+
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2276,5 +2334,152 @@ mod tests {
         assert!(re.is_match("new Intl.DateTimeFormat('en-US').format(date)"));
         assert!(re.is_match("const fmt = new Intl.DateTimeFormat('ja-JP', opts)"));
         assert!(!re.is_match("fmt.format(date)"));
+    }
+
+    // ── Scoped presets tests ──────────────────────────────────────────
+
+    #[test]
+    fn scope_glob_strips_leading_double_star() {
+        assert_eq!(scope_glob("apps/web", "**/*.tsx"), "apps/web/*.tsx");
+        assert_eq!(
+            scope_glob("apps/web", "**/*.{tsx,jsx}"),
+            "apps/web/*.{tsx,jsx}"
+        );
+    }
+
+    #[test]
+    fn scope_glob_prepends_path_to_plain_glob() {
+        assert_eq!(
+            scope_glob("apps/web", "src/**/*.ts"),
+            "apps/web/src/**/*.ts"
+        );
+    }
+
+    #[test]
+    fn scope_glob_handles_simple_filename() {
+        assert_eq!(scope_glob("apps/web", "*.json"), "apps/web/*.json");
+    }
+
+    #[test]
+    fn resolve_scoped_rules_prefixes_globs() {
+        let scoped = vec![ScopedPreset {
+            preset: "nextjs".into(),
+            path: "apps/web".into(),
+        }];
+        let rules = resolve_scoped_rules(&scoped, &[]).unwrap();
+        assert!(!rules.is_empty());
+        for rule in &rules {
+            let glob = rule.glob.as_ref().unwrap();
+            assert!(
+                glob.starts_with("apps/web/"),
+                "expected glob to start with 'apps/web/', got: {glob}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_scoped_rules_none_glob_gets_catch_all() {
+        // ai-safety has banned-dependency rules with no glob
+        let scoped = vec![ScopedPreset {
+            preset: "ai-safety".into(),
+            path: "packages/core".into(),
+        }];
+        let rules = resolve_scoped_rules(&scoped, &[]).unwrap();
+        // banned-dependency rules have no glob by default — should get scoped catch-all
+        for rule in &rules {
+            let glob = rule.glob.as_ref().unwrap();
+            assert!(
+                glob.starts_with("packages/core/"),
+                "expected glob to start with 'packages/core/', got: {glob}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_scoped_rules_user_override_skips_rule() {
+        let scoped = vec![ScopedPreset {
+            preset: "nextjs".into(),
+            path: "apps/web".into(),
+        }];
+        let user_rules = vec![TomlRule {
+            id: "use-next-image".into(),
+            rule_type: "banned-pattern".into(),
+            message: "custom override".into(),
+            ..Default::default()
+        }];
+        let rules = resolve_scoped_rules(&scoped, &user_rules).unwrap();
+        // use-next-image should be skipped because the user overrides it
+        assert!(
+            !rules.iter().any(|r| r.id == "use-next-image"),
+            "scoped rule should be skipped when user defines same id"
+        );
+    }
+
+    #[test]
+    fn scoped_and_global_presets_merge() {
+        let global =
+            resolve_rules(&["security".to_string()], &[]).unwrap();
+        let scoped = resolve_scoped_rules(
+            &[ScopedPreset {
+                preset: "nextjs".into(),
+                path: "apps/web".into(),
+            }],
+            &[],
+        )
+        .unwrap();
+        let mut all = global;
+        all.extend(scoped);
+        // Should have security rules + nextjs scoped rules
+        assert!(all.iter().any(|r| r.id == "no-eval"));
+        assert!(all.iter().any(|r| r.id == "use-next-image"));
+        // The nextjs rules should have scoped globs
+        let next_img = all.iter().find(|r| r.id == "use-next-image").unwrap();
+        assert!(next_img.glob.as_ref().unwrap().starts_with("apps/web/"));
+    }
+
+    #[test]
+    fn resolve_scoped_unknown_preset_errors() {
+        let scoped = vec![ScopedPreset {
+            preset: "nonexistent".into(),
+            path: "apps/web".into(),
+        }];
+        let result = resolve_scoped_rules(&scoped, &[]);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("unknown preset 'nonexistent'"));
+    }
+
+    #[test]
+    fn resolve_scoped_prefixes_file_presence_paths() {
+        // security preset has file-presence rules with forbidden_files
+        let scoped = vec![ScopedPreset {
+            preset: "security".into(),
+            path: "apps/api".into(),
+        }];
+        let rules = resolve_scoped_rules(&scoped, &[]).unwrap();
+        let fp_rule = rules.iter().find(|r| r.id == "no-env-files").unwrap();
+        for f in &fp_rule.forbidden_files {
+            assert!(
+                f.starts_with("apps/api/"),
+                "expected forbidden_file to start with 'apps/api/', got: {f}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_scoped_prefixes_exclude_glob() {
+        // security preset's no-console-log has exclude_glob
+        let scoped = vec![ScopedPreset {
+            preset: "security".into(),
+            path: "apps/api".into(),
+        }];
+        let rules = resolve_scoped_rules(&scoped, &[]).unwrap();
+        let console_rule = rules.iter().find(|r| r.id == "no-console-log").unwrap();
+        for eg in &console_rule.exclude_glob {
+            assert!(
+                eg.starts_with("apps/api/"),
+                "expected exclude_glob to start with 'apps/api/', got: {eg}"
+            );
+        }
     }
 }
