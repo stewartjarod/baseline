@@ -1,5 +1,10 @@
 # Changelog
 
+## [v1.3.0] - 2026-02-17
+
+### Features
+- add scoped presets for monorepo support (f4e1433)
+
 ## [v1.2.2] - 2026-02-17
 
 ### Other
