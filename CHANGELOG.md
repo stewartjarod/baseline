@@ -1,5 +1,20 @@
 # Changelog
 
+## [v1.5.0] - 2026-02-18
+
+### Features
+- Add 6 AST rules: no-outline-none, no-div-click-handler, no-span-click-handler, no-derived-state-effect, no-regexp-in-render, no-object-dep-array (05ddd26)
+- Split `react` preset (35 rules) into `react` (18 correctness) + `react-opinions` (12 style/perf) (05ddd26)
+- Add `react-19` preset with no-forwardref and no-use-context (05ddd26)
+- Rename `ai-safety` preset to `dependency-hygiene` (backward-compatible alias kept) (05ddd26)
+- Migrate Tailwind rules from regex to AST-based class extraction (71015ac)
+
+### Bug Fixes
+- Remove 5 high-false-positive rules from react preset: no-forwardref, no-use-context, no-hardcoded-jsx-id, no-direct-window-listener, no-effect-callback-sync (05ddd26)
+- Fix no-suppress-hydration-warning: exclude layout files (official Next.js dark mode pattern) (05ddd26)
+- Fix no-hardcoded-secrets: add skip_strings, expand exclude_glob for fixtures/mocks (05ddd26)
+- Fix next-image-fill-needs-sizes: increase window size from 3 to 7 lines (05ddd26)
+
 ## [v1.4.2] - 2026-02-17
 
 ### Other
