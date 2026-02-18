@@ -2,11 +2,13 @@ pub mod max_component_size;
 pub mod no_cascading_set_state;
 pub mod no_nested_components;
 pub mod prefer_use_reducer;
+pub mod require_img_alt;
 
 pub use max_component_size::MaxComponentSizeRule;
 pub use no_cascading_set_state::NoCascadingSetStateRule;
 pub use no_nested_components::NoNestedComponentsRule;
 pub use prefer_use_reducer::PreferUseReducerRule;
+pub use require_img_alt::RequireImgAltRule;
 
 use std::path::Path;
 

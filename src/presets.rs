@@ -37,6 +37,8 @@ enum Preset {
     AiCodegen,
     React,
     NextjsBestPractices,
+    Accessibility,
+    ReactNative,
 }
 
 /// Returns the list of all available preset names.
@@ -50,6 +52,8 @@ pub fn available_presets() -> &'static [&'static str] {
         "ai-codegen",
         "react",
         "nextjs-best-practices",
+        "accessibility",
+        "react-native",
     ]
 }
 
@@ -63,6 +67,8 @@ fn resolve_preset(name: &str) -> Option<Preset> {
         "ai-codegen" => Some(Preset::AiCodegen),
         "react" => Some(Preset::React),
         "nextjs-best-practices" => Some(Preset::NextjsBestPractices),
+        "accessibility" => Some(Preset::Accessibility),
+        "react-native" => Some(Preset::ReactNative),
         _ => None,
     }
 }
@@ -275,6 +281,16 @@ fn preset_rules(preset: Preset) -> Vec<TomlRule> {
                 regex: true,
                 exclude_glob: vec!["**/*.test.*".into(), "**/*.spec.*".into()],
                 message: "Insecure http:// URL — use https:// instead".into(),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "no-paste-prevention".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                pattern: Some(r"onPaste[^=]*=[^;]*preventDefault".into()),
+                regex: true,
+                message: "Preventing paste harms accessibility and password manager users".into(),
+                suggest: Some("Remove onPaste preventDefault — let users paste freely".into()),
                 ..Default::default()
             },
         ],
@@ -547,6 +563,125 @@ fn preset_rules(preset: Preset) -> Vec<TomlRule> {
                     message: "Default {} or [] in component params creates a new reference every render — extract to a module-level constant".into(),
                     ..Default::default()
                 },
+                // ── React 19 / composition ───────────────────────────
+                TomlRule {
+                    id: "no-forwardref".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("**/*.{tsx,jsx}".into()),
+                    pattern: Some(r"\bforwardRef\s*[<(]".into()),
+                    regex: true,
+                    message: "forwardRef is unnecessary in React 19 — ref is a regular prop now".into(),
+                    suggest: Some("Accept ref as a prop directly: function Component({ ref, ...props })".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-use-context".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("**/*.{tsx,jsx}".into()),
+                    pattern: Some(r"\buseContext\s*\(".into()),
+                    regex: true,
+                    message: "useContext is replaced by use() in React 19".into(),
+                    suggest: Some("Replace useContext(MyContext) with use(MyContext)".into()),
+                    ..Default::default()
+                },
+                // ── Correctness ──────────────────────────────────────
+                TomlRule {
+                    id: "no-unsafe-createcontext-default".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("**/*.{tsx,jsx,ts,js}".into()),
+                    pattern: Some(r#"createContext\s*\(\s*(?:\{\}|\[\]|undefined|0|''|"")\s*\)"#.into()),
+                    regex: true,
+                    message: "Unsafe createContext default value — use null and handle the missing-provider case".into(),
+                    suggest: Some("Use createContext<T>(null) and throw in a custom hook if context is null".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-effect-callback-sync".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("**/*.{tsx,jsx}".into()),
+                    pattern: Some(r"useEffect\(\(\)\s*(?:=>)?\s*\{?\s*on[A-Z]\w*\(".into()),
+                    regex: true,
+                    message: "Calling event callbacks directly in useEffect may indicate misuse — effects should synchronize, not fire events".into(),
+                    suggest: Some("Move the callback invocation to a user action handler or derive state instead".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-usestate-localstorage-eager".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("**/*.{tsx,jsx}".into()),
+                    pattern: Some(r"useState\(\s*(?:JSON\.parse\s*\()?localStorage\.getItem\(".into()),
+                    regex: true,
+                    message: "localStorage.getItem in useState runs on every render and breaks SSR — use a lazy initializer".into(),
+                    suggest: Some("Use useState(() => localStorage.getItem(...)) for lazy initialization".into()),
+                    ..Default::default()
+                },
+                // ── Performance / bundle ─────────────────────────────
+                TomlRule {
+                    id: "no-regexp-in-render".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("**/*.{tsx,jsx}".into()),
+                    pattern: Some(r"new\s+RegExp\s*\(".into()),
+                    regex: true,
+                    message: "new RegExp() in a component body re-compiles every render — extract to module scope or useMemo".into(),
+                    suggest: Some("Move the RegExp to module scope: const MY_RE = new RegExp(...)".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-lucide-barrel".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    pattern: Some(r#"(?:import\s+.*?\s+from\s+|import\s+|require\s*\(\s*)['"]lucide-react['"]"#.into()),
+                    regex: true,
+                    message: "Barrel import from lucide-react pulls in all icons — use lucide-react/icons/IconName".into(),
+                    suggest: Some("Import specific icons: import { Icon } from 'lucide-react/icons/Icon'".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-mui-barrel".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    pattern: Some(r#"(?:import\s+.*?\s+from\s+|import\s+|require\s*\(\s*)['"]@mui/material['"]"#.into()),
+                    regex: true,
+                    message: "Barrel import from @mui/material increases bundle size — use deep imports".into(),
+                    suggest: Some("Import specific components: import Button from '@mui/material/Button'".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-mui-icons-barrel".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    pattern: Some(r#"(?:import\s+.*?\s+from\s+|import\s+|require\s*\(\s*)['"]@mui/icons-material['"]"#.into()),
+                    regex: true,
+                    message: "Barrel import from @mui/icons-material increases bundle size — use deep imports".into(),
+                    suggest: Some("Import specific icons: import HomeIcon from '@mui/icons-material/Home'".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-react-icons-barrel".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    pattern: Some(r#"(?:import\s+.*?\s+from\s+|import\s+|require\s*\(\s*)['"]react-icons['"]"#.into()),
+                    regex: true,
+                    message: "Barrel import from react-icons pulls in all icon sets — import from a specific set".into(),
+                    suggest: Some("Import from a specific set: import { FaHome } from 'react-icons/fa'".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-date-fns-barrel".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    pattern: Some(r#"(?:import\s+.*?\s+from\s+|import\s+|require\s*\(\s*)['"]date-fns['"]"#.into()),
+                    regex: true,
+                    message: "Barrel import from date-fns increases bundle size — use subpath imports".into(),
+                    suggest: Some("Import specific functions: import { format } from 'date-fns/format'".into()),
+                    ..Default::default()
+                },
             ];
 
             // ── AST-powered rules (require `ast` feature) ────────────
@@ -749,6 +884,42 @@ fn preset_rules(preset: Preset) -> Vec<TomlRule> {
                     suggest: Some("Move redirect() outside the try/catch block".into()),
                     ..Default::default()
                 },
+                // ── Server Actions ───────────────────────────────────
+                TomlRule {
+                    id: "server-action-requires-auth".into(),
+                    rule_type: "required-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("app/**/*.{ts,tsx}".into()),
+                    pattern: Some(r"(?:verifySession|getSession|auth\(\)|currentUser|getServerSession)".into()),
+                    regex: true,
+                    condition_pattern: Some("'use server'".into()),
+                    message: "Server actions should verify authentication before performing mutations".into(),
+                    suggest: Some("Add an auth check: const session = await getSession()".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "server-action-requires-validation".into(),
+                    rule_type: "required-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("app/**/*.{ts,tsx}".into()),
+                    pattern: Some(r"(?:\.parse\(|\.safeParse\(|z\.object\(|\.validate\()".into()),
+                    regex: true,
+                    condition_pattern: Some("'use server'".into()),
+                    message: "Server actions should validate input — never trust client data".into(),
+                    suggest: Some("Use Zod or similar: const data = schema.parse(formData)".into()),
+                    ..Default::default()
+                },
+                // ── Hydration ────────────────────────────────────────
+                TomlRule {
+                    id: "no-suppress-hydration-warning".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("**/*.{tsx,jsx}".into()),
+                    pattern: Some("suppressHydrationWarning".into()),
+                    message: "suppressHydrationWarning hides real bugs — fix the mismatch instead".into(),
+                    suggest: Some("Use useEffect + state to defer client-only content, or move to a Client Component".into()),
+                    ..Default::default()
+                },
             ];
 
             // ── AST-powered rules (require `ast` feature) ────────────
@@ -911,6 +1082,250 @@ fn preset_rules(preset: Preset) -> Vec<TomlRule> {
                 pattern: Some(r"\w![.\[]".into()),
                 regex: true,
                 message: "Avoid non-null assertion (!) — use optional chaining (?.) or proper null checks".into(),
+                ..Default::default()
+            },
+        ],
+        Preset::Accessibility => {
+            #[allow(unused_mut)]
+            let mut rules = vec![
+                TomlRule {
+                    id: "no-div-click-handler".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "error".into(),
+                    glob: Some("**/*.{tsx,jsx}".into()),
+                    pattern: Some(r"<div[^>]+onClick\s*=".into()),
+                    regex: true,
+                    message: "Non-interactive <div> with onClick is not keyboard accessible — use <button> instead".into(),
+                    suggest: Some("Replace <div onClick=...> with <button onClick=...>".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-span-click-handler".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "error".into(),
+                    glob: Some("**/*.{tsx,jsx}".into()),
+                    pattern: Some(r"<span[^>]+onClick\s*=".into()),
+                    regex: true,
+                    message: "Non-interactive <span> with onClick is not keyboard accessible — use <button> instead".into(),
+                    suggest: Some("Replace <span onClick=...> with <button onClick=...>".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-outline-none".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("**/*.{tsx,jsx}".into()),
+                    pattern: Some(r"\boutline-none\b".into()),
+                    regex: true,
+                    message: "outline-none removes the focus indicator — keyboard users can't see what's focused".into(),
+                    suggest: Some("Use focus-visible:outline-none with a custom focus ring instead".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-user-scalable-no".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "error".into(),
+                    glob: Some("**/*.{tsx,jsx}".into()),
+                    pattern: Some(r"user-scalable\s*=\s*no".into()),
+                    regex: true,
+                    message: "user-scalable=no prevents zooming — violates WCAG 1.4.4 (Resize Text)".into(),
+                    suggest: Some("Remove user-scalable=no to allow pinch-to-zoom".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-autofocus-unrestricted".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("**/*.{tsx,jsx}".into()),
+                    pattern: Some(r"\bautoFocus\b".into()),
+                    regex: true,
+                    message: "autoFocus can disorient screen reader users — use it sparingly (e.g., modals only)".into(),
+                    suggest: Some("Remove autoFocus or limit to modal/dialog initial focus".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-transition-all-tailwind".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("**/*.{tsx,jsx}".into()),
+                    pattern: Some(r"\btransition-all\b".into()),
+                    regex: true,
+                    message: "transition-all can cause motion sickness — transition specific properties and respect prefers-reduced-motion".into(),
+                    suggest: Some("Use transition-colors, transition-opacity, or transition-transform instead".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-hardcoded-date-format".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("**/*.{ts,tsx,js,jsx}".into()),
+                    pattern: Some(r"\.toDateString\(\s*\)|\.toLocaleString\(\s*\)|\.toLocaleDateString\(\s*\)".into()),
+                    regex: true,
+                    message: "Date formatting without explicit locale is inconsistent across browsers — pass a locale".into(),
+                    suggest: Some("Pass an explicit locale: .toLocaleDateString('en-US', { ... })".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-inline-navigation-onclick".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("**/*.{tsx,jsx}".into()),
+                    pattern: Some(r"onClick[^=]*=[^;]*window\.location".into()),
+                    regex: true,
+                    message: "onClick with window.location bypasses browser navigation — use <a> or router for accessible navigation".into(),
+                    suggest: Some("Use <a href=...> or your router's <Link> component instead".into()),
+                    ..Default::default()
+                },
+            ];
+
+            #[cfg(feature = "ast")]
+            {
+                rules.push(TomlRule {
+                    id: "require-img-alt".into(),
+                    rule_type: "require-img-alt".into(),
+                    severity: "error".into(),
+                    glob: Some("**/*.{tsx,jsx}".into()),
+                    message: "img element must have an alt attribute for screen readers".into(),
+                    suggest: Some("Add alt=\"description\" or alt=\"\" for decorative images".into()),
+                    ..Default::default()
+                });
+            }
+
+            rules
+        }
+        Preset::ReactNative => vec![
+            TomlRule {
+                id: "rn-no-touchable-opacity".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"<TouchableOpacity|import\s+\{[^}]*TouchableOpacity".into()),
+                regex: true,
+                message: "TouchableOpacity is deprecated — use Pressable instead".into(),
+                suggest: Some("Replace <TouchableOpacity> with <Pressable>".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "rn-no-touchable-highlight".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"<TouchableHighlight|import\s+\{[^}]*TouchableHighlight".into()),
+                regex: true,
+                message: "TouchableHighlight is deprecated — use Pressable instead".into(),
+                suggest: Some("Replace <TouchableHighlight> with <Pressable>".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "rn-no-legacy-shadow".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx,ts,js}".into()),
+                pattern: Some(r"shadowColor\s*:|shadowOffset\s*:|shadowOpacity\s*:|shadowRadius\s*:".into()),
+                regex: true,
+                message: "Legacy shadow properties are iOS-only — use boxShadow (RN 0.76+) for cross-platform shadows".into(),
+                suggest: Some("Use style={{ boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "rn-no-rn-image-import".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"import\s+\{[^}]*\bImage\b[^}]*\}\s+from\s+['\x22]react-native['\x22]".into()),
+                regex: true,
+                message: "react-native Image lacks caching and modern formats — use expo-image instead".into(),
+                suggest: Some("Replace with: import { Image } from 'expo-image'".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "rn-no-custom-header".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx,ts,js}".into()),
+                pattern: Some(r"header:\s*\(\)\s*=>".into()),
+                regex: true,
+                message: "Custom header render function loses native header animations — use headerTitle or screen options".into(),
+                suggest: Some("Use screenOptions={{ headerTitle: ... }} instead of header: () => ...".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "rn-no-fonts-usefonts".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"useFonts\s*\(\s*\{".into()),
+                regex: true,
+                message: "useFonts blocks rendering with a loading screen — use expo-font config plugin for build-time font loading".into(),
+                suggest: Some("Add fonts to app.json expo-font plugin for instant availability".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "rn-no-font-loadasync".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx,ts,js}".into()),
+                pattern: Some(r"Font\.loadAsync\s*\(".into()),
+                regex: true,
+                message: "Font.loadAsync blocks rendering — use expo-font config plugin for build-time font loading".into(),
+                suggest: Some("Add fonts to app.json expo-font plugin for instant availability".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "rn-no-inline-intl-numberformat".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"new\s+Intl\.NumberFormat\s*\(".into()),
+                regex: true,
+                message: "new Intl.NumberFormat() in a component body re-creates the formatter every render — extract to module scope".into(),
+                suggest: Some("Move to module scope: const fmt = new Intl.NumberFormat(...)".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "rn-no-inline-intl-datetimeformat".into(),
+                rule_type: "banned-pattern".into(),
+                severity: "warning".into(),
+                glob: Some("**/*.{tsx,jsx}".into()),
+                pattern: Some(r"new\s+Intl\.DateTimeFormat\s*\(".into()),
+                regex: true,
+                message: "new Intl.DateTimeFormat() in a component body re-creates the formatter every render — extract to module scope".into(),
+                suggest: Some("Move to module scope: const fmt = new Intl.DateTimeFormat(...)".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "rn-no-js-stack-navigator".into(),
+                rule_type: "banned-import".into(),
+                severity: "warning".into(),
+                packages: vec!["@react-navigation/stack".into()],
+                message: "JS-based stack navigator is slow — use @react-navigation/native-stack for native performance".into(),
+                suggest: Some("Replace with: import { createNativeStackNavigator } from '@react-navigation/native-stack'".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "rn-no-js-bottom-tabs".into(),
+                rule_type: "banned-import".into(),
+                severity: "warning".into(),
+                packages: vec!["@react-navigation/bottom-tabs".into()],
+                message: "JS-based bottom tabs lack native feel — use react-native-bottom-tabs for native tab bar".into(),
+                suggest: Some("Replace with: import { createNativeBottomTabNavigator } from 'react-native-bottom-tabs'".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "rn-no-linear-gradient-lib".into(),
+                rule_type: "banned-import".into(),
+                severity: "warning".into(),
+                packages: vec!["expo-linear-gradient".into()],
+                message: "expo-linear-gradient adds a JS bridge — use React Native's built-in linearGradient style (0.76+)".into(),
+                suggest: Some("Use style={{ experimental_backgroundImage: 'linear-gradient(...)' }}".into()),
+                ..Default::default()
+            },
+            TomlRule {
+                id: "rn-no-js-bottom-sheet".into(),
+                rule_type: "banned-dependency".into(),
+                severity: "warning".into(),
+                packages: vec!["@gorhom/bottom-sheet".into()],
+                message: "@gorhom/bottom-sheet uses JS animations — use expo-bottom-sheet or react-native-bottom-sheet for native performance".into(),
                 ..Default::default()
             },
         ],
@@ -1094,9 +1509,9 @@ mod tests {
     }
 
     #[test]
-    fn security_has_ten_rules() {
+    fn security_has_eleven_rules() {
         let rules = preset_rules(Preset::Security);
-        assert_eq!(rules.len(), 10);
+        assert_eq!(rules.len(), 11);
         let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
         assert!(ids.contains(&"no-env-files"));
         assert!(ids.contains(&"no-hardcoded-secrets"));
@@ -1108,6 +1523,7 @@ mod tests {
         assert!(ids.contains(&"no-postmessage-wildcard"));
         assert!(ids.contains(&"no-outerhtml"));
         assert!(ids.contains(&"no-http-links"));
+        assert!(ids.contains(&"no-paste-prevention"));
     }
 
     #[test]
@@ -1148,9 +1564,9 @@ mod tests {
     fn react_has_expected_rule_count() {
         let rules = preset_rules(Preset::React);
         #[cfg(not(feature = "ast"))]
-        assert_eq!(rules.len(), 16);
+        assert_eq!(rules.len(), 27);
         #[cfg(feature = "ast")]
-        assert_eq!(rules.len(), 19); // 16 base + 3 AST rules (nested-component-def swapped in-place)
+        assert_eq!(rules.len(), 30); // 27 base + 3 AST rules (nested-component-def swapped in-place)
         let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
         assert!(ids.contains(&"no-array-index-key"));
         assert!(ids.contains(&"no-conditional-render-zero"));
@@ -1168,6 +1584,20 @@ mod tests {
         assert!(ids.contains(&"no-lazy-state-init"));
         assert!(ids.contains(&"no-object-dep-array"));
         assert!(ids.contains(&"no-default-object-prop"));
+        // React 19 / composition
+        assert!(ids.contains(&"no-forwardref"));
+        assert!(ids.contains(&"no-use-context"));
+        // Correctness
+        assert!(ids.contains(&"no-unsafe-createcontext-default"));
+        assert!(ids.contains(&"no-effect-callback-sync"));
+        assert!(ids.contains(&"no-usestate-localstorage-eager"));
+        // Performance / bundle
+        assert!(ids.contains(&"no-regexp-in-render"));
+        assert!(ids.contains(&"no-lucide-barrel"));
+        assert!(ids.contains(&"no-mui-barrel"));
+        assert!(ids.contains(&"no-mui-icons-barrel"));
+        assert!(ids.contains(&"no-react-icons-barrel"));
+        assert!(ids.contains(&"no-date-fns-barrel"));
         #[cfg(feature = "ast")]
         {
             assert!(ids.contains(&"max-component-size"));
@@ -1188,9 +1618,9 @@ mod tests {
     fn nextjs_best_practices_has_expected_rule_count() {
         let rules = preset_rules(Preset::NextjsBestPractices);
         #[cfg(not(feature = "ast"))]
-        assert_eq!(rules.len(), 14);
+        assert_eq!(rules.len(), 17);
         #[cfg(feature = "ast")]
-        assert_eq!(rules.len(), 18); // 14 base + 4 AST rules
+        assert_eq!(rules.len(), 21); // 17 base + 4 AST rules
         let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
         assert!(ids.contains(&"use-next-image"));
         assert!(ids.contains(&"next-image-fill-needs-sizes"));
@@ -1206,6 +1636,9 @@ mod tests {
         assert!(ids.contains(&"no-async-client-component"));
         assert!(ids.contains(&"require-metadata-in-pages"));
         assert!(ids.contains(&"no-redirect-in-try-catch"));
+        assert!(ids.contains(&"server-action-requires-auth"));
+        assert!(ids.contains(&"server-action-requires-validation"));
+        assert!(ids.contains(&"no-suppress-hydration-warning"));
         #[cfg(feature = "ast")]
         {
             assert!(ids.contains(&"max-component-size"));
@@ -1213,6 +1646,46 @@ mod tests {
             assert!(ids.contains(&"prefer-use-reducer"));
             assert!(ids.contains(&"no-cascading-set-state"));
         }
+    }
+
+    #[test]
+    fn accessibility_has_expected_rule_count() {
+        let rules = preset_rules(Preset::Accessibility);
+        #[cfg(not(feature = "ast"))]
+        assert_eq!(rules.len(), 8);
+        #[cfg(feature = "ast")]
+        assert_eq!(rules.len(), 9); // 8 base + 1 AST rule (require-img-alt)
+        let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
+        assert!(ids.contains(&"no-div-click-handler"));
+        assert!(ids.contains(&"no-span-click-handler"));
+        assert!(ids.contains(&"no-outline-none"));
+        assert!(ids.contains(&"no-user-scalable-no"));
+        assert!(ids.contains(&"no-autofocus-unrestricted"));
+        assert!(ids.contains(&"no-transition-all-tailwind"));
+        assert!(ids.contains(&"no-hardcoded-date-format"));
+        assert!(ids.contains(&"no-inline-navigation-onclick"));
+        #[cfg(feature = "ast")]
+        assert!(ids.contains(&"require-img-alt"));
+    }
+
+    #[test]
+    fn react_native_has_thirteen_rules() {
+        let rules = preset_rules(Preset::ReactNative);
+        assert_eq!(rules.len(), 13);
+        let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
+        assert!(ids.contains(&"rn-no-touchable-opacity"));
+        assert!(ids.contains(&"rn-no-touchable-highlight"));
+        assert!(ids.contains(&"rn-no-legacy-shadow"));
+        assert!(ids.contains(&"rn-no-rn-image-import"));
+        assert!(ids.contains(&"rn-no-custom-header"));
+        assert!(ids.contains(&"rn-no-fonts-usefonts"));
+        assert!(ids.contains(&"rn-no-font-loadasync"));
+        assert!(ids.contains(&"rn-no-inline-intl-numberformat"));
+        assert!(ids.contains(&"rn-no-inline-intl-datetimeformat"));
+        assert!(ids.contains(&"rn-no-js-stack-navigator"));
+        assert!(ids.contains(&"rn-no-js-bottom-tabs"));
+        assert!(ids.contains(&"rn-no-linear-gradient-lib"));
+        assert!(ids.contains(&"rn-no-js-bottom-sheet"));
     }
 
     #[test]
@@ -1455,5 +1928,353 @@ mod tests {
         assert!(!re.is_match("// handle any case"));
         assert!(!re.is_match("const anything = 1"));
         assert!(!re.is_match("if (any_flag) {}"));
+    }
+
+    // ── React preset pattern tests ──────────────────────────────────
+
+    #[test]
+    fn no_forwardref_pattern() {
+        let re = regex_for(Preset::React, "no-forwardref");
+        assert!(re.is_match("const Input = forwardRef<HTMLInputElement>((props, ref) => {"));
+        assert!(re.is_match("const Btn = forwardRef((props, ref) => <button />)"));
+        assert!(re.is_match("export default forwardRef(MyComponent)"));
+        // should NOT match
+        assert!(!re.is_match("// removed forwardRef"));
+        assert!(!re.is_match("const forwardRefValue = 42"));
+    }
+
+    #[test]
+    fn no_use_context_pattern() {
+        let re = regex_for(Preset::React, "no-use-context");
+        assert!(re.is_match("const theme = useContext(ThemeContext)"));
+        assert!(re.is_match("const val = useContext(Ctx)"));
+        // should NOT match
+        assert!(!re.is_match("const ctx = useContextSelector(Ctx, s => s.val)"));
+        assert!(!re.is_match("// useContext is deprecated"));
+    }
+
+    #[test]
+    fn no_unsafe_createcontext_default_pattern() {
+        let re = regex_for(Preset::React, "no-unsafe-createcontext-default");
+        // unsafe defaults
+        assert!(re.is_match("const Ctx = createContext({})"));
+        assert!(re.is_match("const Ctx = createContext([])"));
+        assert!(re.is_match("const Ctx = createContext(undefined)"));
+        assert!(re.is_match("const Ctx = createContext(0)"));
+        assert!(re.is_match("const Ctx = createContext('')"));
+        assert!(re.is_match(r#"const Ctx = createContext("")"#));
+        // safe: null or meaningful value
+        assert!(!re.is_match("const Ctx = createContext(null)"));
+        assert!(!re.is_match("const Ctx = createContext(defaultValue)"));
+        assert!(!re.is_match("const Ctx = createContext({ theme: 'dark' })"));
+    }
+
+    #[test]
+    fn no_effect_callback_sync_pattern() {
+        let re = regex_for(Preset::React, "no-effect-callback-sync");
+        assert!(re.is_match("useEffect(() => { onChange(value)"));
+        assert!(re.is_match("useEffect(() => { onUpdate(data)"));
+        assert!(re.is_match("useEffect(() => onSubmit(form)"));
+        // should NOT match — no on* callback
+        assert!(!re.is_match("useEffect(() => { setCount(1) }"));
+        assert!(!re.is_match("useEffect(() => { fetchData() }"));
+    }
+
+    #[test]
+    fn no_usestate_localstorage_eager_pattern() {
+        let re = regex_for(Preset::React, "no-usestate-localstorage-eager");
+        assert!(re.is_match("useState(localStorage.getItem('key'))"));
+        assert!(re.is_match("useState(JSON.parse(localStorage.getItem('key')))"));
+        // lazy initializer is fine
+        assert!(!re.is_match("useState(() => localStorage.getItem('key'))"));
+        // not localStorage
+        assert!(!re.is_match("useState(sessionStorage.getItem('key'))"));
+    }
+
+    #[test]
+    fn no_regexp_in_render_pattern() {
+        let re = regex_for(Preset::React, "no-regexp-in-render");
+        assert!(re.is_match("const re = new RegExp(pattern)"));
+        assert!(re.is_match("new RegExp('\\\\d+', 'g')"));
+        // regex literal is fine (not new RegExp)
+        assert!(!re.is_match("const re = /\\d+/g"));
+    }
+
+    #[test]
+    fn no_lucide_barrel_pattern() {
+        let re = regex_for(Preset::React, "no-lucide-barrel");
+        // barrel imports should match
+        assert!(re.is_match("import { Home } from 'lucide-react'"));
+        assert!(re.is_match(r#"import { Home } from "lucide-react""#));
+        assert!(re.is_match("require('lucide-react')"));
+        // deep imports should NOT match
+        assert!(!re.is_match("import Home from 'lucide-react/icons/Home'"));
+        assert!(!re.is_match("import { Home } from 'lucide-react/dist/esm/icons/home'"));
+    }
+
+    #[test]
+    fn no_mui_barrel_pattern() {
+        let re = regex_for(Preset::React, "no-mui-barrel");
+        assert!(re.is_match("import { Button } from '@mui/material'"));
+        assert!(re.is_match("require('@mui/material')"));
+        // deep imports should NOT match
+        assert!(!re.is_match("import Button from '@mui/material/Button'"));
+        assert!(!re.is_match("import { useTheme } from '@mui/material/styles'"));
+    }
+
+    #[test]
+    fn no_mui_icons_barrel_pattern() {
+        let re = regex_for(Preset::React, "no-mui-icons-barrel");
+        assert!(re.is_match("import { Home } from '@mui/icons-material'"));
+        // deep import is fine
+        assert!(!re.is_match("import HomeIcon from '@mui/icons-material/Home'"));
+    }
+
+    #[test]
+    fn no_react_icons_barrel_pattern() {
+        let re = regex_for(Preset::React, "no-react-icons-barrel");
+        assert!(re.is_match("import { FaHome } from 'react-icons'"));
+        // subpath import is fine
+        assert!(!re.is_match("import { FaHome } from 'react-icons/fa'"));
+    }
+
+    #[test]
+    fn no_date_fns_barrel_pattern() {
+        let re = regex_for(Preset::React, "no-date-fns-barrel");
+        assert!(re.is_match("import { format } from 'date-fns'"));
+        assert!(re.is_match("require('date-fns')"));
+        // subpath import is fine
+        assert!(!re.is_match("import { format } from 'date-fns/format'"));
+        assert!(!re.is_match("import { format } from 'date-fns/esm'"));
+    }
+
+    // ── Next.js best-practices pattern tests ────────────────────────
+
+    #[test]
+    fn server_action_requires_auth_patterns() {
+        let rules = preset_rules(Preset::NextjsBestPractices);
+        let rule = rules.iter().find(|r| r.id == "server-action-requires-auth").unwrap();
+        let re = regex::Regex::new(rule.pattern.as_ref().unwrap()).unwrap();
+        let cond_re = regex::Regex::new(rule.condition_pattern.as_ref().unwrap()).unwrap();
+        // condition pattern matches server action files
+        assert!(cond_re.is_match("'use server'"));
+        assert!(!cond_re.is_match("'use client'"));
+        // required pattern matches auth calls
+        assert!(re.is_match("await verifySession()"));
+        assert!(re.is_match("const s = await getSession()"));
+        assert!(re.is_match("const s = await auth()"));
+        assert!(re.is_match("const u = await currentUser()"));
+        assert!(re.is_match("const s = await getServerSession()"));
+        // no auth call
+        assert!(!re.is_match("await db.insert(data)"));
+    }
+
+    #[test]
+    fn server_action_requires_validation_patterns() {
+        let rules = preset_rules(Preset::NextjsBestPractices);
+        let rule = rules.iter().find(|r| r.id == "server-action-requires-validation").unwrap();
+        let re = regex::Regex::new(rule.pattern.as_ref().unwrap()).unwrap();
+        // validation calls
+        assert!(re.is_match("const data = schema.parse(formData)"));
+        assert!(re.is_match("const result = schema.safeParse(input)"));
+        assert!(re.is_match("const s = z.object({})"));
+        assert!(re.is_match("await body.validate()"));
+        // no validation
+        assert!(!re.is_match("await db.insert(formData)"));
+    }
+
+    #[test]
+    fn no_suppress_hydration_warning_pattern() {
+        let rules = preset_rules(Preset::NextjsBestPractices);
+        let rule = rules.iter().find(|r| r.id == "no-suppress-hydration-warning").unwrap();
+        let pat = rule.pattern.as_ref().unwrap();
+        assert!(!rule.regex);
+        assert!("<div suppressHydrationWarning>".contains(pat.as_str()));
+        assert!("<body suppressHydrationWarning={true}>".contains(pat.as_str()));
+        assert!(!"<div className='safe'>".contains(pat.as_str()));
+    }
+
+    // ── Security pattern tests (new) ────────────────────────────────
+
+    #[test]
+    fn no_paste_prevention_pattern() {
+        let re = regex_for(Preset::Security, "no-paste-prevention");
+        assert!(re.is_match("onPaste={(e) => e.preventDefault()}"));
+        assert!(re.is_match("onPaste={e => { e.preventDefault() }}"));
+        assert!(re.is_match("onPaste={handlePaste} // where handlePaste calls preventDefault"));
+        // should NOT match unrelated
+        assert!(!re.is_match("onPaste={handlePaste}"));
+        assert!(!re.is_match("onCopy={(e) => e.preventDefault()}"));
+    }
+
+    // ── Accessibility pattern tests ─────────────────────────────────
+
+    #[test]
+    fn no_div_click_handler_pattern() {
+        let re = regex_for(Preset::Accessibility, "no-div-click-handler");
+        assert!(re.is_match("<div className='card' onClick={handleClick}>"));
+        assert!(re.is_match("<div onClick = {fn}>"));
+        // button is fine
+        assert!(!re.is_match("<button onClick={handleClick}>"));
+        // closing tag
+        assert!(!re.is_match("</div>"));
+        // div without onClick
+        assert!(!re.is_match("<div className='card'>"));
+    }
+
+    #[test]
+    fn no_span_click_handler_pattern() {
+        let re = regex_for(Preset::Accessibility, "no-span-click-handler");
+        assert!(re.is_match("<span role='button' onClick={handleClick}>"));
+        assert!(re.is_match("<span onClick={fn}>"));
+        // button is fine
+        assert!(!re.is_match("<button onClick={handleClick}>"));
+        // span without onClick
+        assert!(!re.is_match("<span className='label'>"));
+    }
+
+    #[test]
+    fn no_outline_none_pattern() {
+        let re = regex_for(Preset::Accessibility, "no-outline-none");
+        assert!(re.is_match("className='outline-none'"));
+        assert!(re.is_match("className='focus:outline-none ring-2'"));
+        // should NOT match outline-offset or outline-0
+        assert!(!re.is_match("className='outline-offset-2'"));
+        assert!(!re.is_match("className='outline-0'"));
+    }
+
+    #[test]
+    fn no_user_scalable_no_pattern() {
+        let re = regex_for(Preset::Accessibility, "no-user-scalable-no");
+        assert!(re.is_match("user-scalable=no"));
+        assert!(re.is_match("user-scalable = no"));
+        // user-scalable=yes is fine
+        assert!(!re.is_match("user-scalable=yes"));
+    }
+
+    #[test]
+    fn no_autofocus_unrestricted_pattern() {
+        let re = regex_for(Preset::Accessibility, "no-autofocus-unrestricted");
+        assert!(re.is_match("<input autoFocus />"));
+        assert!(re.is_match("<Input autoFocus={true} />"));
+        // should NOT match substring
+        assert!(!re.is_match("const autoFocusEnabled = true"));
+    }
+
+    #[test]
+    fn no_transition_all_tailwind_pattern() {
+        let re = regex_for(Preset::Accessibility, "no-transition-all-tailwind");
+        assert!(re.is_match("className='transition-all duration-300'"));
+        // specific transition is fine
+        assert!(!re.is_match("className='transition-colors duration-300'"));
+        assert!(!re.is_match("className='transition-opacity'"));
+    }
+
+    #[test]
+    fn no_hardcoded_date_format_pattern() {
+        let re = regex_for(Preset::Accessibility, "no-hardcoded-date-format");
+        assert!(re.is_match("date.toDateString()"));
+        assert!(re.is_match("date.toLocaleString()"));
+        assert!(re.is_match("date.toLocaleDateString()"));
+        // with locale argument is fine (not empty parens)
+        assert!(!re.is_match("date.toLocaleDateString('en-US')"));
+        assert!(!re.is_match("date.toLocaleString('de-DE', opts)"));
+    }
+
+    #[test]
+    fn no_inline_navigation_onclick_pattern() {
+        let re = regex_for(Preset::Accessibility, "no-inline-navigation-onclick");
+        assert!(re.is_match("onClick={() => window.location.href = '/home'}"));
+        assert!(re.is_match("onClick={() => { window.location = '/page' }}"));
+        // router.push is fine (not window.location)
+        assert!(!re.is_match("onClick={() => router.push('/home')}"));
+    }
+
+    // ── React Native pattern tests ──────────────────────────────────
+
+    #[test]
+    fn rn_no_touchable_opacity_pattern() {
+        let re = regex_for(Preset::ReactNative, "rn-no-touchable-opacity");
+        assert!(re.is_match("<TouchableOpacity onPress={fn}>"));
+        assert!(re.is_match("import { TouchableOpacity } from 'react-native'"));
+        assert!(re.is_match("import { View, TouchableOpacity } from 'react-native'"));
+        // Pressable is fine
+        assert!(!re.is_match("<Pressable onPress={fn}>"));
+    }
+
+    #[test]
+    fn rn_no_touchable_highlight_pattern() {
+        let re = regex_for(Preset::ReactNative, "rn-no-touchable-highlight");
+        assert!(re.is_match("<TouchableHighlight onPress={fn}>"));
+        assert!(re.is_match("import { TouchableHighlight } from 'react-native'"));
+        // Pressable is fine
+        assert!(!re.is_match("<Pressable onPress={fn}>"));
+    }
+
+    #[test]
+    fn rn_no_legacy_shadow_pattern() {
+        let re = regex_for(Preset::ReactNative, "rn-no-legacy-shadow");
+        assert!(re.is_match("shadowColor: '#000'"));
+        assert!(re.is_match("shadowOffset: { width: 0 }"));
+        assert!(re.is_match("shadowOpacity: 0.25"));
+        assert!(re.is_match("shadowRadius: 3.84"));
+        // boxShadow is fine
+        assert!(!re.is_match("boxShadow: '0 2px 4px rgba(0,0,0,0.1)'"));
+    }
+
+    #[test]
+    fn rn_no_rn_image_import_pattern() {
+        let re = regex_for(Preset::ReactNative, "rn-no-rn-image-import");
+        assert!(re.is_match("import { Image } from 'react-native'"));
+        assert!(re.is_match("import { View, Image } from 'react-native'"));
+        assert!(re.is_match("import { Image, Text } from 'react-native'"));
+        // expo-image is fine
+        assert!(!re.is_match("import { Image } from 'expo-image'"));
+        // ImageBackground is different
+        assert!(!re.is_match("import { ImageBackground } from 'react-native'"));
+    }
+
+    #[test]
+    fn rn_no_custom_header_pattern() {
+        let re = regex_for(Preset::ReactNative, "rn-no-custom-header");
+        assert!(re.is_match("header: () => <CustomHeader />"));
+        assert!(re.is_match("header: () =>"));
+        // headerTitle is fine
+        assert!(!re.is_match("headerTitle: 'Settings'"));
+    }
+
+    #[test]
+    fn rn_no_fonts_usefonts_pattern() {
+        let re = regex_for(Preset::ReactNative, "rn-no-fonts-usefonts");
+        assert!(re.is_match("const [loaded] = useFonts({ Inter: require('./fonts/Inter.ttf') })"));
+        assert!(re.is_match("useFonts({"));
+        // unrelated hooks
+        assert!(!re.is_match("useForm({ mode: 'onChange' })"));
+    }
+
+    #[test]
+    fn rn_no_font_loadasync_pattern() {
+        let re = regex_for(Preset::ReactNative, "rn-no-font-loadasync");
+        assert!(re.is_match("await Font.loadAsync({ Inter: require('./Inter.ttf') })"));
+        assert!(re.is_match("Font.loadAsync(fonts)"));
+        // unrelated
+        assert!(!re.is_match("await Image.loadAsync(uri)"));
+    }
+
+    #[test]
+    fn rn_no_inline_intl_numberformat_pattern() {
+        let re = regex_for(Preset::ReactNative, "rn-no-inline-intl-numberformat");
+        assert!(re.is_match("new Intl.NumberFormat('en-US').format(price)"));
+        assert!(re.is_match("const fmt = new Intl.NumberFormat('de-DE', { style: 'currency' })"));
+        // already extracted (no new keyword in this context, but the pattern is about new)
+        assert!(!re.is_match("fmt.format(1234)"));
+    }
+
+    #[test]
+    fn rn_no_inline_intl_datetimeformat_pattern() {
+        let re = regex_for(Preset::ReactNative, "rn-no-inline-intl-datetimeformat");
+        assert!(re.is_match("new Intl.DateTimeFormat('en-US').format(date)"));
+        assert!(re.is_match("const fmt = new Intl.DateTimeFormat('ja-JP', opts)"));
+        assert!(!re.is_match("fmt.format(date)"));
     }
 }

@@ -56,6 +56,8 @@ pub fn build_rule(rule_type: &str, config: &RuleConfig) -> Result<Box<dyn Rule>,
         "prefer-use-reducer" => Ok(Box::new(ast::PreferUseReducerRule::new(config)?)),
         #[cfg(feature = "ast")]
         "no-cascading-set-state" => Ok(Box::new(ast::NoCascadingSetStateRule::new(config)?)),
+        #[cfg(feature = "ast")]
+        "require-img-alt" => Ok(Box::new(ast::RequireImgAltRule::new(config)?)),
         _ => Err(FactoryError::UnknownRuleType(rule_type.to_string())),
     }
 }
