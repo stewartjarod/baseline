@@ -1,4 +1,3 @@
-#[cfg(feature = "ast")]
 use crate::rules::ast;
 use crate::config::RuleConfig;
 use crate::rules::banned_dependency::BannedDependencyRule;
@@ -48,16 +47,11 @@ pub fn build_rule(rule_type: &str, config: &RuleConfig) -> Result<Box<dyn Rule>,
         "required-pattern" => Ok(Box::new(RequiredPatternRule::new(config)?)),
         "file-presence" => Ok(Box::new(FilePresenceRule::new(config)?)),
         "window-pattern" => Ok(Box::new(WindowPatternRule::new(config)?)),
-        #[cfg(feature = "ast")]
-        "max-component-size" => Ok(Box::new(ast::MaxComponentSizeRule::new(config)?)),
-        #[cfg(feature = "ast")]
-        "no-nested-components" => Ok(Box::new(ast::NoNestedComponentsRule::new(config)?)),
-        #[cfg(feature = "ast")]
-        "prefer-use-reducer" => Ok(Box::new(ast::PreferUseReducerRule::new(config)?)),
-        #[cfg(feature = "ast")]
-        "no-cascading-set-state" => Ok(Box::new(ast::NoCascadingSetStateRule::new(config)?)),
-        #[cfg(feature = "ast")]
-        "require-img-alt" => Ok(Box::new(ast::RequireImgAltRule::new(config)?)),
+"max-component-size" => Ok(Box::new(ast::MaxComponentSizeRule::new(config)?)),
+"no-nested-components" => Ok(Box::new(ast::NoNestedComponentsRule::new(config)?)),
+"prefer-use-reducer" => Ok(Box::new(ast::PreferUseReducerRule::new(config)?)),
+"no-cascading-set-state" => Ok(Box::new(ast::NoCascadingSetStateRule::new(config)?)),
+"require-img-alt" => Ok(Box::new(ast::RequireImgAltRule::new(config)?)),
         _ => Err(FactoryError::UnknownRuleType(rule_type.to_string())),
     }
 }

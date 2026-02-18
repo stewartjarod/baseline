@@ -408,20 +408,6 @@ fn preset_rules(preset: Preset) -> Vec<TomlRule> {
                     suggest: Some("Replace {arr.length && ...} with {arr.length > 0 && ...}".into()),
                     ..Default::default()
                 },
-                // no-nested-component-def: regex heuristic without `ast`, AST version with `ast`
-                #[cfg(not(feature = "ast"))]
-                TomlRule {
-                    id: "no-nested-component-def".into(),
-                    rule_type: "banned-pattern".into(),
-                    severity: "error".into(),
-                    glob: Some("**/*.{tsx,jsx}".into()),
-                    pattern: Some(r"^\s+(?:const|let|function)\s+[A-Z][a-zA-Z0-9]*\s*(?::\s*React\.FC|=\s*(?:\([^)]*\)|[a-zA-Z_]\w*)\s*(?::\s*[A-Za-z<>\[\]|&, ]+)?\s*=>|=\s*function|\()".into()),
-                    regex: true,
-                    message: "Component defined inside another component — causes remounting on every render".into(),
-                    suggest: Some("Move component definition to module scope or extract to a separate file".into()),
-                    ..Default::default()
-                },
-                #[cfg(feature = "ast")]
                 TomlRule {
                     id: "no-nested-component-def".into(),
                     rule_type: "no-nested-components".into(),
@@ -685,8 +671,6 @@ fn preset_rules(preset: Preset) -> Vec<TomlRule> {
                 },
             ];
 
-            // ── AST-powered rules (require `ast` feature) ────────────
-            #[cfg(feature = "ast")]
             {
                 rules.push(TomlRule {
                     id: "max-component-size".into(),
@@ -924,8 +908,6 @@ fn preset_rules(preset: Preset) -> Vec<TomlRule> {
                 },
             ];
 
-            // ── AST-powered rules (require `ast` feature) ────────────
-            #[cfg(feature = "ast")]
             {
                 rules.push(TomlRule {
                     id: "max-component-size".into(),
@@ -1180,7 +1162,6 @@ fn preset_rules(preset: Preset) -> Vec<TomlRule> {
                 },
             ];
 
-            #[cfg(feature = "ast")]
             {
                 rules.push(TomlRule {
                     id: "require-img-alt".into(),
@@ -1628,10 +1609,7 @@ mod tests {
     #[test]
     fn react_has_expected_rule_count() {
         let rules = preset_rules(Preset::React);
-        #[cfg(not(feature = "ast"))]
-        assert_eq!(rules.len(), 27);
-        #[cfg(feature = "ast")]
-        assert_eq!(rules.len(), 30); // 27 base + 3 AST rules (nested-component-def swapped in-place)
+        assert_eq!(rules.len(), 30);
         let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
         assert!(ids.contains(&"no-array-index-key"));
         assert!(ids.contains(&"no-conditional-render-zero"));
@@ -1663,29 +1641,17 @@ mod tests {
         assert!(ids.contains(&"no-mui-icons-barrel"));
         assert!(ids.contains(&"no-react-icons-barrel"));
         assert!(ids.contains(&"no-date-fns-barrel"));
-        #[cfg(feature = "ast")]
-        {
-            assert!(ids.contains(&"max-component-size"));
-            assert!(ids.contains(&"prefer-use-reducer"));
-            assert!(ids.contains(&"no-cascading-set-state"));
-            // no-nested-component-def uses AST type when feature is enabled
-            let nested_rule = rules.iter().find(|r| r.id == "no-nested-component-def").unwrap();
-            assert_eq!(nested_rule.rule_type, "no-nested-components");
-        }
-        #[cfg(not(feature = "ast"))]
-        {
-            let nested_rule = rules.iter().find(|r| r.id == "no-nested-component-def").unwrap();
-            assert_eq!(nested_rule.rule_type, "banned-pattern");
-        }
+        assert!(ids.contains(&"max-component-size"));
+        assert!(ids.contains(&"prefer-use-reducer"));
+        assert!(ids.contains(&"no-cascading-set-state"));
+        let nested_rule = rules.iter().find(|r| r.id == "no-nested-component-def").unwrap();
+        assert_eq!(nested_rule.rule_type, "no-nested-components");
     }
 
     #[test]
     fn nextjs_best_practices_has_expected_rule_count() {
         let rules = preset_rules(Preset::NextjsBestPractices);
-        #[cfg(not(feature = "ast"))]
-        assert_eq!(rules.len(), 17);
-        #[cfg(feature = "ast")]
-        assert_eq!(rules.len(), 21); // 17 base + 4 AST rules
+        assert_eq!(rules.len(), 21);
         let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
         assert!(ids.contains(&"use-next-image"));
         assert!(ids.contains(&"next-image-fill-needs-sizes"));
@@ -1704,22 +1670,16 @@ mod tests {
         assert!(ids.contains(&"server-action-requires-auth"));
         assert!(ids.contains(&"server-action-requires-validation"));
         assert!(ids.contains(&"no-suppress-hydration-warning"));
-        #[cfg(feature = "ast")]
-        {
-            assert!(ids.contains(&"max-component-size"));
-            assert!(ids.contains(&"no-nested-components"));
-            assert!(ids.contains(&"prefer-use-reducer"));
-            assert!(ids.contains(&"no-cascading-set-state"));
-        }
+        assert!(ids.contains(&"max-component-size"));
+        assert!(ids.contains(&"no-nested-components"));
+        assert!(ids.contains(&"prefer-use-reducer"));
+        assert!(ids.contains(&"no-cascading-set-state"));
     }
 
     #[test]
     fn accessibility_has_expected_rule_count() {
         let rules = preset_rules(Preset::Accessibility);
-        #[cfg(not(feature = "ast"))]
-        assert_eq!(rules.len(), 8);
-        #[cfg(feature = "ast")]
-        assert_eq!(rules.len(), 9); // 8 base + 1 AST rule (require-img-alt)
+        assert_eq!(rules.len(), 9);
         let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
         assert!(ids.contains(&"no-div-click-handler"));
         assert!(ids.contains(&"no-span-click-handler"));
@@ -1729,7 +1689,6 @@ mod tests {
         assert!(ids.contains(&"no-transition-all-tailwind"));
         assert!(ids.contains(&"no-hardcoded-date-format"));
         assert!(ids.contains(&"no-inline-navigation-onclick"));
-        #[cfg(feature = "ast")]
         assert!(ids.contains(&"require-img-alt"));
     }
 

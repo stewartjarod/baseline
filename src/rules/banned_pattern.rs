@@ -1,7 +1,6 @@
 use crate::config::{RuleConfig, Severity};
 use crate::rules::{Rule, RuleBuildError, ScanContext, Violation};
 use regex::Regex;
-#[cfg(feature = "ast")]
 use std::ops::Range;
 
 /// Scans files line-by-line for a literal string or regex match.
@@ -17,7 +16,6 @@ pub struct BannedPatternRule {
     glob: Option<String>,
     pattern: String,
     compiled_regex: Option<Regex>,
-    #[cfg_attr(not(feature = "ast"), allow(dead_code))]
     skip_strings: bool,
 }
 
@@ -67,8 +65,7 @@ impl Rule for BannedPatternRule {
     fn check_file(&self, ctx: &ScanContext) -> Vec<Violation> {
         let mut violations = Vec::new();
 
-        #[cfg(feature = "ast")]
-        let line_offsets: Vec<usize> = if self.skip_strings {
+let line_offsets: Vec<usize> = if self.skip_strings {
             std::iter::once(0)
                 .chain(ctx.content.match_indices('\n').map(|(i, _)| i + 1))
                 .collect()
@@ -115,8 +112,7 @@ impl Rule for BannedPatternRule {
             }
         }
 
-        #[cfg(feature = "ast")]
-        if self.skip_strings {
+if self.skip_strings {
             if let Some(tree) = crate::rules::ast::parse_file(ctx.file_path, ctx.content) {
                 let string_ranges = collect_string_ranges(&tree, ctx.content);
                 violations.retain(|v| {
@@ -136,7 +132,6 @@ impl Rule for BannedPatternRule {
 }
 
 /// Walk the tree-sitter AST and collect byte ranges of `string` and `template_string` nodes.
-#[cfg(feature = "ast")]
 fn collect_string_ranges(tree: &tree_sitter::Tree, _source: &str) -> Vec<Range<usize>> {
     let mut ranges = Vec::new();
     let mut cursor = tree.walk();
@@ -144,7 +139,6 @@ fn collect_string_ranges(tree: &tree_sitter::Tree, _source: &str) -> Vec<Range<u
     ranges
 }
 
-#[cfg(feature = "ast")]
 fn collect_string_ranges_recursive(
     cursor: &mut tree_sitter::TreeCursor,
     ranges: &mut Vec<Range<usize>>,
@@ -285,7 +279,6 @@ mod tests {
         assert!(violations[0].source_line.is_some());
     }
 
-    #[cfg(feature = "ast")]
     mod skip_strings {
         use super::*;
 
