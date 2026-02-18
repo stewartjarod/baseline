@@ -1,5 +1,10 @@
 # Changelog
 
+## [v1.2.0] - 2026-02-17
+
+### Features
+- add accessibility and react-native presets, expand react/nextjs/security (ad792f1)
+
 ## [v1.1.0] - 2026-02-17
 
 ### Features
