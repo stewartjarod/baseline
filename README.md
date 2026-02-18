@@ -129,9 +129,13 @@ Available presets:
 | `shadcn-strict` | 5 | Dark mode enforcement (error), theme tokens (error), no inline styles, no CSS-in-JS, no competing frameworks |
 | `shadcn-migrate` | 2 | Dark mode enforcement (error), theme tokens (warning) — softer, for gradual migration |
 | `ai-safety` | 3 | Bans deprecated packages: moment, lodash, request |
-| `security` | 10 | No .env files, no hardcoded secrets, no eval, no dangerouslySetInnerHTML, no innerHTML, no document.write, no wildcard postMessage, no http:// URLs, no console.log |
+| `security` | 11 | No .env files, no hardcoded secrets, no eval, no dangerouslySetInnerHTML, no innerHTML, no document.write, no wildcard postMessage, no outerHTML, no http:// URLs, no console.log, no paste prevention |
 | `nextjs` | 8 | Use next/image, next/link, next/font, next/script; no next/head or next/router in App Router; no private env vars in client components; require 'use client' for hooks |
 | `ai-codegen` | 12 | No placeholder text, no TODOs, no `any` type, no empty catch, no console.log, no @ts-ignore, no `as any`, no eslint-disable, no @ts-nocheck, no var, no require in TS, no non-null assertions |
+| `react` | 35 | Correctness (index keys, zero-render, nested components), security, bundle size (barrel imports, deprecated packages), rendering performance, state/effects best practices, React 19 patterns |
+| `nextjs-best-practices` | 21 | Images, routing, scripts/fonts, server/client boundary, SEO metadata, server actions (auth + validation), hydration, component size, nested components |
+| `accessibility` | 9 | No div/span click handlers, no outline-none, no user-scalable=no, no unrestricted autoFocus, no transition-all, no hardcoded date formats, no onclick navigation, require img alt |
+| `react-native` | 13 | No deprecated Touchable*, no legacy shadows, use expo-image, no custom headers, no useFonts/loadAsync, no inline Intl formatters, use native navigators, no JS bottom sheet |
 
 ### Plugins
 
@@ -391,6 +395,81 @@ allowed_classes = ["bg-green-500", "text-red-600"]
 
 ---
 
+### AST Rules (tree-sitter)
+
+The following rules use tree-sitter for AST-aware analysis of React/TypeScript files. They parse `*.tsx`, `*.jsx`, `*.ts`, and `*.js` files and understand component boundaries, skipping nested component definitions when counting.
+
+#### `max-component-size` — Flag oversized components
+
+Counts lines in each React component (PascalCase function declarations, arrow functions, and class declarations) and flags any that exceed the threshold.
+
+```toml
+[[rule]]
+id = "max-component-size"
+type = "max-component-size"
+severity = "warning"
+glob = "**/*.{tsx,jsx}"
+max_count = 150
+message = "Component exceeds 150 lines — split into smaller components"
+```
+
+#### `no-nested-components` — Detect components inside components
+
+Flags component definitions nested inside other components, which causes remounting on every render.
+
+```toml
+[[rule]]
+id = "no-nested-components"
+type = "no-nested-components"
+severity = "error"
+glob = "**/*.{tsx,jsx}"
+message = "Component defined inside another component — causes remounting on every render"
+```
+
+#### `prefer-use-reducer` — Too many useState calls
+
+Flags components with more than N `useState` calls, suggesting `useReducer` for related state.
+
+```toml
+[[rule]]
+id = "prefer-use-reducer"
+type = "prefer-use-reducer"
+severity = "warning"
+glob = "**/*.{tsx,jsx}"
+max_count = 4
+message = "Component has 4+ useState calls — consider useReducer for related state"
+```
+
+#### `no-cascading-set-state` — Too many setState in useEffect
+
+Flags `useEffect` callbacks with more than N `set*` calls, suggesting `useReducer` or derived state.
+
+```toml
+[[rule]]
+id = "no-cascading-set-state"
+type = "no-cascading-set-state"
+severity = "warning"
+glob = "**/*.{tsx,jsx}"
+max_count = 3
+message = "useEffect has 3+ setState calls — consider useReducer or derived state"
+```
+
+#### `require-img-alt` — Require alt attributes on img elements
+
+Flags `<img>` elements (self-closing and opening) that are missing an `alt` attribute. Only checks lowercase `img` tags — custom `<Image>` components are ignored.
+
+```toml
+[[rule]]
+id = "require-img-alt"
+type = "require-img-alt"
+severity = "error"
+glob = "**/*.{tsx,jsx}"
+message = "img element must have an alt attribute for screen readers"
+suggest = "Add alt=\"description\" or alt=\"\" for decorative images"
+```
+
+---
+
 ### `window-pattern` — Enforce proximity between patterns
 
 Checks that when a trigger pattern appears, a required pattern also appears within N lines. Useful for enforcing that certain operations always have a nearby guard, filter, or cleanup.
@@ -448,7 +527,7 @@ message = "Async handlers should have try/catch within 10 lines"
 | `manifest` | string | `banned-dependency` | Manifest file to check (default: `package.json`) |
 | `required_files` | string[] | `file-presence` | Files that must exist |
 | `forbidden_files` | string[] | `file-presence` | Files that must not exist |
-| `max_count` | int | `ratchet`, `window-pattern` | Maximum allowed occurrences (ratchet) or window size in lines (window-pattern) |
+| `max_count` | int | `ratchet`, `window-pattern`, `max-component-size`, `prefer-use-reducer`, `no-cascading-set-state` | Maximum allowed occurrences (ratchet), window size in lines (window-pattern), or threshold for AST rules |
 | `allowed_classes` | string[] | `tailwind-dark-mode`, `tailwind-theme-tokens` | Classes exempt from checks |
 | `token_map` | string[] | `tailwind-theme-tokens` | Custom `"raw=semantic"` mappings |
 
@@ -712,7 +791,14 @@ src/
     ├── ratchet.rs                  Decreasing-count enforcement
     ├── window_pattern.rs           Sliding-window pattern matching
     ├── tailwind_dark_mode.rs       Dark mode variant enforcement
-    └── tailwind_theme_tokens.rs    shadcn semantic token enforcement
+    ├── tailwind_theme_tokens.rs    shadcn semantic token enforcement
+    └── ast/
+        ├── mod.rs                  AST infrastructure (tree-sitter parsing, component detection)
+        ├── max_component_size.rs   Component line count enforcement
+        ├── no_nested_components.rs Nested component definition detection
+        ├── prefer_use_reducer.rs   Excessive useState detection
+        ├── no_cascading_set_state.rs Cascading setState in useEffect detection
+        └── require_img_alt.rs      Missing img alt attribute detection
 
 examples/
 ├── baseline.toml                   Sample project config
@@ -838,7 +924,6 @@ message = "Migrate to newApi.request()"
 
 ## Future Directions
 
-- **Tree-sitter integration** — AST-aware rules for scope-sensitive matching (e.g., "ban `any` in function parameters but not in type guards")
 - **WASM plugin system** — distribute custom rules as portable WASM modules
 - **Watch mode** — re-run on file changes during development
 - **Monorepo support** — per-package config inheritance with shared base rules

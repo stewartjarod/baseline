@@ -1,6 +1,6 @@
 {
   "name": "code-baseline",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Enforce architectural decisions AI coding tools keep ignoring",
   "license": "MIT",
   "repository": {
@@ -14,11 +14,11 @@
     "bin/baseline"
   ],
   "optionalDependencies": {
-    "@code-baseline/cli-darwin-arm64": "1.4.1",
-    "@code-baseline/cli-darwin-x64": "1.4.1",
-    "@code-baseline/cli-linux-x64": "1.4.1",
-    "@code-baseline/cli-linux-arm64": "1.4.1",
-    "@code-baseline/cli-win32-x64": "1.4.1"
+    "@code-baseline/cli-darwin-arm64": "1.4.2",
+    "@code-baseline/cli-darwin-x64": "1.4.2",
+    "@code-baseline/cli-linux-x64": "1.4.2",
+    "@code-baseline/cli-linux-arm64": "1.4.2",
+    "@code-baseline/cli-win32-x64": "1.4.2"
   },
   "keywords": [
     "linter",

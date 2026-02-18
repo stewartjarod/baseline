@@ -1,5 +1,10 @@
 # Changelog
 
+## [v1.4.2] - 2026-02-17
+
+### Other
+- add bulletproof React rules to react preset: SSR safety, composition, portability (95a5467)
+
 ## [v1.4.1] - 2026-02-17
 
 ### Other
