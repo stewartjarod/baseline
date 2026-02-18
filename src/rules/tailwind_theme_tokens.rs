@@ -1,4 +1,5 @@
 use crate::config::{RuleConfig, Severity};
+use crate::rules::ast::{collect_class_attributes, parse_file};
 use crate::rules::{Rule, RuleBuildError, ScanContext, Violation};
 use regex::Regex;
 use std::collections::HashMap;
@@ -190,19 +191,83 @@ impl Rule for TailwindThemeTokensRule {
     }
 
     fn check_file(&self, ctx: &ScanContext) -> Vec<Violation> {
+        if let Some(tree) = parse_file(ctx.file_path, ctx.content) {
+            return self.check_with_ast(&tree, ctx);
+        }
+        self.check_with_regex(ctx)
+    }
+}
+
+impl TailwindThemeTokensRule {
+    fn check_with_ast(&self, tree: &tree_sitter::Tree, ctx: &ScanContext) -> Vec<Violation> {
+        let mut violations = Vec::new();
+        let source = ctx.content.as_bytes();
+
+        for attr_fragments in collect_class_attributes(tree, source) {
+            for frag in &attr_fragments {
+                for class in frag.value.split_whitespace() {
+                    if class.starts_with("dark:") {
+                        continue;
+                    }
+
+                    // Strip variant prefixes (hover:, focus:, etc.) to get base class
+                    let base_class = class.rsplit(':').next().unwrap_or(class);
+
+                    if let Some(replacement) = self.token_map.get(base_class) {
+                        if self.color_re.is_match(base_class) {
+                            let line = frag.line + 1;
+                            let col_offset = frag.value.find(class).unwrap_or(0);
+                            let col = frag.col + col_offset + 1;
+
+                            let msg = if self.message.is_empty() {
+                                format!(
+                                    "Raw color class '{}' — use semantic token '{}' for theme support",
+                                    base_class, replacement
+                                )
+                            } else {
+                                format!("{}: '{}' → '{}'", self.message, base_class, replacement)
+                            };
+
+                            let source_line =
+                                ctx.content.lines().nth(line - 1).map(|l| l.to_string());
+
+                            violations.push(Violation {
+                                rule_id: self.id.clone(),
+                                severity: self.severity,
+                                file: ctx.file_path.to_path_buf(),
+                                line: Some(line),
+                                column: Some(col),
+                                message: msg,
+                                suggest: Some(format!(
+                                    "Replace '{}' with '{}'",
+                                    base_class, replacement
+                                )),
+                                source_line,
+                                fix: Some(crate::rules::Fix {
+                                    old: base_class.to_string(),
+                                    new: replacement.clone(),
+                                }),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        violations
+    }
+
+    fn check_with_regex(&self, ctx: &ScanContext) -> Vec<Violation> {
         let mut violations = Vec::new();
 
         for (line_num, line) in ctx.content.lines().enumerate() {
-            // Only check lines that are plausibly setting CSS classes
             if !self.line_has_class_context(line) {
                 continue;
             }
 
-            // Find all color utility classes on this line
             for cap in self.color_re.captures_iter(line) {
                 let full_match = cap.get(0).unwrap().as_str();
 
-                // Skip classes that use dark: prefix — those are intentional overrides
                 let match_start = cap.get(0).unwrap().start();
                 if match_start >= 5 {
                     let prefix = &line[match_start.saturating_sub(5)..match_start];
@@ -211,7 +276,6 @@ impl Rule for TailwindThemeTokensRule {
                     }
                 }
 
-                // Check if this raw class is in our ban map
                 if let Some(replacement) = self.token_map.get(full_match) {
                     let msg = if self.message.is_empty() {
                         format!(
@@ -365,7 +429,7 @@ mod tests {
     #[test]
     fn semantic_primary_tokens_pass() {
         let rule = make_rule();
-        let line = r#"      className={cn("bg-primary text-primary-foreground")}"#;
+        let line = r#"<div className={cn("bg-primary text-primary-foreground")} />"#;
         let violations = check(&rule, line);
         assert!(violations.is_empty());
     }
@@ -399,7 +463,7 @@ mod tests {
     #[test]
     fn cn_call_context_detected() {
         let rule = make_rule();
-        let line = r#"      className={cn("bg-gray-100 text-gray-600")}"#;
+        let line = r#"<div className={cn("bg-gray-100 text-gray-600")} />"#;
         let violations = check(&rule, line);
         assert!(!violations.is_empty(), "raw colors inside cn() should be flagged");
     }
@@ -486,6 +550,47 @@ mod tests {
             "GoodCard.tsx should have no violations, got {}: {:?}",
             violations.len(),
             violations.iter().map(|v| &v.message).collect::<Vec<_>>()
+        );
+    }
+
+    // ── AST-specific tests ──
+
+    #[test]
+    fn multiline_cn_all_args_detected() {
+        let rule = make_rule();
+        let content = r#"<span className={cn(
+            "px-2 py-1 rounded-full text-xs font-medium",
+            status === 'active' && "bg-green-100 text-green-800",
+            status === 'inactive' && "bg-gray-100 text-gray-600",
+        )} />"#;
+        let violations = check(&rule, content);
+        assert!(
+            violations.len() >= 2,
+            "multi-line cn() should detect raw colors across args, got {}",
+            violations.len()
+        );
+    }
+
+    #[test]
+    fn ternary_both_branches_checked() {
+        let rule = make_rule();
+        let content = r#"<div className={active ? "bg-white" : "bg-gray-100"} />"#;
+        let violations = check(&rule, content);
+        assert!(
+            violations.len() >= 2,
+            "both ternary branches should be checked, got {}",
+            violations.len()
+        );
+    }
+
+    #[test]
+    fn data_object_no_false_positive() {
+        let rule = make_rule();
+        let content = r#"const config = { className: "bg-white text-gray-900" };"#;
+        let violations = check(&rule, content);
+        assert!(
+            violations.is_empty(),
+            "non-JSX className key should not trigger violations"
         );
     }
 }

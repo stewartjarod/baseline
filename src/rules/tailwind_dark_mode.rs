@@ -1,4 +1,5 @@
 use crate::config::{RuleConfig, Severity};
+use crate::rules::ast::{collect_class_attributes, parse_file};
 use crate::rules::{Rule, RuleBuildError, ScanContext, Violation};
 use regex::Regex;
 use std::collections::HashSet;
@@ -247,35 +248,101 @@ impl Rule for TailwindDarkModeRule {
     }
 
     fn check_file(&self, ctx: &ScanContext) -> Vec<Violation> {
+        if let Some(tree) = parse_file(ctx.file_path, ctx.content) {
+            return self.check_with_ast(&tree, ctx);
+        }
+        self.check_with_regex(ctx)
+    }
+}
+
+impl TailwindDarkModeRule {
+    fn check_with_ast(&self, tree: &tree_sitter::Tree, ctx: &ScanContext) -> Vec<Violation> {
+        let mut violations = Vec::new();
+        let source = ctx.content.as_bytes();
+
+        for attr_fragments in collect_class_attributes(tree, source) {
+            let full_class_string: String = attr_fragments
+                .iter()
+                .map(|f| f.value.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            let missing = self.find_missing_dark_variants(&full_class_string);
+
+            for (class, token_suggestion) in missing {
+                let (line, col) = attr_fragments
+                    .iter()
+                    .find_map(|f| {
+                        f.value.split_whitespace().find(|&c| c == class).map(|_| {
+                            let offset = f.value.find(&class).unwrap_or(0);
+                            (f.line + 1, f.col + offset + 1)
+                        })
+                    })
+                    .unwrap_or((1, 1));
+
+                let msg = if self.message.is_empty() {
+                    format!("Class '{}' sets a color without a dark: variant", class)
+                } else {
+                    format!("{}: '{}'", self.message, class)
+                };
+
+                let suggest = token_suggestion
+                    .or_else(|| self.suggest.clone())
+                    .or_else(|| {
+                        Some(format!(
+                            "Add 'dark:{}' or replace with a semantic token class",
+                            suggest_dark_counterpart(&class)
+                        ))
+                    });
+
+                let source_line = ctx.content.lines().nth(line - 1).map(|l| l.to_string());
+
+                violations.push(Violation {
+                    rule_id: self.id.clone(),
+                    severity: self.severity,
+                    file: ctx.file_path.to_path_buf(),
+                    line: Some(line),
+                    column: Some(col),
+                    message: msg,
+                    suggest,
+                    source_line,
+                    fix: None,
+                });
+            }
+        }
+
+        violations
+    }
+
+    fn check_with_regex(&self, ctx: &ScanContext) -> Vec<Violation> {
         let mut violations = Vec::new();
 
         for (line_num, line) in ctx.content.lines().enumerate() {
             let class_strings = self.extract_class_strings(line);
-
-            // Also check for multi-word strings that look like class lists in
-            // cn(), clsx(), classNames() calls — common in shadcn projects.
-            // We do a broader scan for quoted strings inside these function calls.
             let extra_strings = self.extract_cn_strings(line);
 
-            for class_str in class_strings.iter().copied().chain(extra_strings.iter().map(|s| s.as_str())) {
+            for class_str in class_strings
+                .iter()
+                .copied()
+                .chain(extra_strings.iter().map(|s| s.as_str()))
+            {
                 let missing = self.find_missing_dark_variants(class_str);
 
                 for (class, token_suggestion) in missing {
                     let msg = if self.message.is_empty() {
-                        format!(
-                            "Class '{}' sets a color without a dark: variant",
-                            class
-                        )
+                        format!("Class '{}' sets a color without a dark: variant", class)
                     } else {
                         format!("{}: '{}'", self.message, class)
                     };
 
                     let suggest = token_suggestion
                         .or_else(|| self.suggest.clone())
-                        .or_else(|| Some(format!(
-                            "Add 'dark:{}' or replace with a semantic token class",
-                            suggest_dark_counterpart(&class)
-                        )));
+                        .or_else(|| {
+                            Some(format!(
+                                "Add 'dark:{}' or replace with a semantic token class",
+                                suggest_dark_counterpart(&class)
+                            ))
+                        });
 
                     violations.push(Violation {
                         rule_id: self.id.clone(),
@@ -294,9 +361,7 @@ impl Rule for TailwindDarkModeRule {
 
         violations
     }
-}
 
-impl TailwindDarkModeRule {
     /// Extract string arguments from cn(), clsx(), classNames() calls.
     fn extract_cn_strings(&self, line: &str) -> Vec<String> {
         let mut results = Vec::new();
@@ -306,7 +371,6 @@ impl TailwindDarkModeRule {
             for cap in self.cn_str_re.captures_iter(remainder) {
                 if let Some(m) = cap.get(1) {
                     let s = m.as_str();
-                    // Only include if it looks like Tailwind classes (has spaces or dashes)
                     if s.contains('-') || s.contains(' ') {
                         results.push(s.to_string());
                     }
@@ -476,7 +540,7 @@ mod tests {
     #[test]
     fn cn_call_with_hardcoded_colors_flagged() {
         let rule = make_rule();
-        let line = r#"      className={cn("bg-gray-100 text-gray-600")}"#;
+        let line = r#"<div className={cn("bg-gray-100 text-gray-600")} />"#;
         let violations = check(&rule, line);
         assert!(!violations.is_empty(), "hardcoded colors inside cn() should be flagged");
     }
@@ -484,7 +548,7 @@ mod tests {
     #[test]
     fn cn_call_with_semantic_tokens_passes() {
         let rule = make_rule();
-        let line = r#"      className={cn("bg-primary text-primary-foreground")}"#;
+        let line = r#"<div className={cn("bg-primary text-primary-foreground")} />"#;
         let violations = check(&rule, line);
         assert!(violations.is_empty(), "semantic tokens inside cn() should pass");
     }
@@ -549,6 +613,58 @@ mod tests {
             "GoodCard.tsx should have no violations, got {}: {:?}",
             violations.len(),
             violations.iter().map(|v| &v.message).collect::<Vec<_>>()
+        );
+    }
+
+    // ── AST-specific tests ──
+
+    #[test]
+    fn multiline_cn_all_args_detected() {
+        let rule = make_rule();
+        let content = r#"<span className={cn(
+            "px-2 py-1 rounded-full text-xs font-medium",
+            status === 'active' && "bg-green-100 text-green-800",
+            status === 'inactive' && "bg-gray-100 text-gray-600",
+        )} />"#;
+        let violations = check(&rule, content);
+        assert!(
+            violations.len() >= 4,
+            "multi-line cn() should detect all hardcoded colors, got {}",
+            violations.len()
+        );
+    }
+
+    #[test]
+    fn dark_variant_across_cn_args_no_violation() {
+        let rule = make_rule();
+        let content = r#"<div className={cn("bg-white", "dark:bg-slate-900")} />"#;
+        let violations = check(&rule, content);
+        assert!(
+            violations.is_empty(),
+            "dark: in separate cn() arg should suppress violation for same attribute"
+        );
+    }
+
+    #[test]
+    fn ternary_both_branches_checked() {
+        let rule = make_rule();
+        let content = r#"<div className={active ? "bg-white" : "bg-gray-100"} />"#;
+        let violations = check(&rule, content);
+        assert!(
+            violations.len() >= 2,
+            "both ternary branches should be checked, got {}",
+            violations.len()
+        );
+    }
+
+    #[test]
+    fn data_object_no_false_positive() {
+        let rule = make_rule();
+        let content = r#"const config = { className: "bg-white text-gray-900" };"#;
+        let violations = check(&rule, content);
+        assert!(
+            violations.is_empty(),
+            "non-JSX className key should not trigger violations"
         );
     }
 }
