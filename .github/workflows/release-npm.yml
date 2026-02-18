@@ -116,7 +116,7 @@ jobs:
       - name: Publish platform packages
         run: |
           for dir in cli-darwin-arm64 cli-darwin-x64 cli-linux-x64 cli-linux-arm64 cli-win32-x64; do
-            echo "Publishing code-baseline-${dir}..."
+            echo "Publishing @code-baseline/cli-${dir}..."
             npm publish ./npm/${dir} --access public --provenance
           done
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## [v1.2.1] - 2026-02-17
+
+### Other
+- migrate npm platform packages to @code-baseline scoped org
+
 ## [v1.2.0] - 2026-02-17
 
 ### Features

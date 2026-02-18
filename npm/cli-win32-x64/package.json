@@ -1,11 +1,11 @@
 {
-  "name": "code-baseline-win32-x64",
-  "version": "1.2.0",
+  "name": "@code-baseline/cli-win32-x64",
+  "version": "1.2.1",
   "description": "Baseline CLI binary for Windows x64",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/stewartjarod/baseline"
+    "url": "git+https://github.com/stewartjarod/baseline.git"
   },
   "os": [
     "win32"
