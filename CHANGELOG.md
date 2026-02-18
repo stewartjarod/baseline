@@ -1,5 +1,10 @@
 # Changelog
 
+## [v1.6.0] - 2026-02-18
+
+### Features
+- Allow scoped presets to accept an array of preset names (44e0350)
+
 ## [v1.5.1] - 2026-02-18
 
 ### Bug Fixes
