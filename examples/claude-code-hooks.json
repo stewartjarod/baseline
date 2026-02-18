@@ -2,9 +2,14 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Write|Edit",
-        "command": "baseline scan \"$CLAUDE_FILE_PATH\" --config baseline.toml --format json",
-        "description": "Run Baseline after file edits to catch violations immediately"
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE_PATH=$(cat | jq -r '.tool_input.file_path // empty') && [ -n \"$FILE_PATH\" ] && npx code-baseline@latest scan \"$FILE_PATH\" --config baseline.toml --format compact 1>&2 || true",
+            "timeout": 10
+          }
+        ]
       }
     ]
   }
