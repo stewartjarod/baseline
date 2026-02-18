@@ -597,14 +597,69 @@ fn preset_rules(preset: Preset) -> Vec<TomlRule> {
                     ..Default::default()
                 },
                 TomlRule {
-                    id: "no-usestate-localstorage-eager".into(),
+                    id: "no-usestate-browser-api".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "error".into(),
+                    glob: Some("**/*.{tsx,jsx}".into()),
+                    pattern: Some(r"useState\(\s*(?:JSON\.parse\s*\()?\s*(?:localStorage|sessionStorage)\.".into()),
+                    regex: true,
+                    message: "Browser storage API in useState crashes during SSR — initialize with a default and read in useEffect".into(),
+                    suggest: Some("useState('default') + useEffect(() => setState(localStorage.getItem(...)), [])".into()),
+                    ..Default::default()
+                },
+                // ── Bulletproof / SSR safety ───────────────────────────
+                TomlRule {
+                    id: "no-hardcoded-jsx-id".into(),
                     rule_type: "banned-pattern".into(),
                     severity: "warning".into(),
                     glob: Some("**/*.{tsx,jsx}".into()),
-                    pattern: Some(r"useState\(\s*(?:JSON\.parse\s*\()?localStorage\.getItem\(".into()),
+                    pattern: Some(r#"id=["'][^"']+["']"#.into()),
                     regex: true,
-                    message: "localStorage.getItem in useState runs on every render and breaks SSR — use a lazy initializer".into(),
-                    suggest: Some("Use useState(() => localStorage.getItem(...)) for lazy initialization".into()),
+                    message: "Hardcoded id attribute — multiple instances will share the same ID and clash".into(),
+                    suggest: Some("Use useId() to generate unique, SSR-safe IDs".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-clone-element".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("**/*.{tsx,jsx,ts,js}".into()),
+                    pattern: Some("cloneElement".into()),
+                    message: "cloneElement breaks with Server Components, React.lazy, and async children".into(),
+                    suggest: Some("Use React Context to pass data to children instead".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-react-children-api".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("**/*.{tsx,jsx,ts,js}".into()),
+                    pattern: Some(r"Children\.(map|forEach|count|only|toArray)".into()),
+                    regex: true,
+                    message: "React.Children API is fragile — breaks with Server Components and async children".into(),
+                    suggest: Some("Use composition patterns or React Context instead".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-direct-window-listener".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("**/*.{tsx,jsx,ts,js}".into()),
+                    pattern: Some(r"window\.(addEventListener|removeEventListener)".into()),
+                    regex: true,
+                    message: "Direct window reference breaks in iframes, portals, and pop-out windows".into(),
+                    suggest: Some("Use ref.current?.ownerDocument.defaultView to resolve the correct window".into()),
+                    ..Default::default()
+                },
+                TomlRule {
+                    id: "no-direct-document-query".into(),
+                    rule_type: "banned-pattern".into(),
+                    severity: "warning".into(),
+                    glob: Some("**/*.{tsx,jsx,ts,js}".into()),
+                    pattern: Some(r"document\.(getElementById|querySelector|querySelectorAll|getElementsBy)".into()),
+                    regex: true,
+                    message: "Direct DOM queries bypass React and break in SSR — use refs instead".into(),
+                    suggest: Some("Use useRef() and ref.current for DOM access".into()),
                     ..Default::default()
                 },
                 // ── Performance / bundle ─────────────────────────────
@@ -1609,7 +1664,7 @@ mod tests {
     #[test]
     fn react_has_expected_rule_count() {
         let rules = preset_rules(Preset::React);
-        assert_eq!(rules.len(), 30);
+        assert_eq!(rules.len(), 35);
         let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
         assert!(ids.contains(&"no-array-index-key"));
         assert!(ids.contains(&"no-conditional-render-zero"));
@@ -1633,7 +1688,13 @@ mod tests {
         // Correctness
         assert!(ids.contains(&"no-unsafe-createcontext-default"));
         assert!(ids.contains(&"no-effect-callback-sync"));
-        assert!(ids.contains(&"no-usestate-localstorage-eager"));
+        assert!(ids.contains(&"no-usestate-browser-api"));
+        // Bulletproof / SSR safety
+        assert!(ids.contains(&"no-hardcoded-jsx-id"));
+        assert!(ids.contains(&"no-clone-element"));
+        assert!(ids.contains(&"no-react-children-api"));
+        assert!(ids.contains(&"no-direct-window-listener"));
+        assert!(ids.contains(&"no-direct-document-query"));
         // Performance / bundle
         assert!(ids.contains(&"no-regexp-in-render"));
         assert!(ids.contains(&"no-lucide-barrel"));
@@ -2005,14 +2066,56 @@ mod tests {
     }
 
     #[test]
-    fn no_usestate_localstorage_eager_pattern() {
-        let re = regex_for(Preset::React, "no-usestate-localstorage-eager");
+    fn no_usestate_browser_api_pattern() {
+        let re = regex_for(Preset::React, "no-usestate-browser-api");
         assert!(re.is_match("useState(localStorage.getItem('key'))"));
         assert!(re.is_match("useState(JSON.parse(localStorage.getItem('key')))"));
+        assert!(re.is_match("useState(sessionStorage.getItem('key'))"));
+        assert!(re.is_match("useState(JSON.parse(sessionStorage.getItem('key')))"));
         // lazy initializer is fine
         assert!(!re.is_match("useState(() => localStorage.getItem('key'))"));
-        // not localStorage
-        assert!(!re.is_match("useState(sessionStorage.getItem('key'))"));
+    }
+
+    #[test]
+    fn no_hardcoded_jsx_id_pattern() {
+        let re = regex_for(Preset::React, "no-hardcoded-jsx-id");
+        assert!(re.is_match(r#"<div id="theme">"#));
+        assert!(re.is_match(r#"<input id='modal'/>"#));
+        // dynamic ids are fine
+        assert!(!re.is_match(r#"<div id={id}>"#));
+    }
+
+    #[test]
+    fn no_clone_element_pattern() {
+        let rules = preset_rules(Preset::React);
+        let rule = rules.iter().find(|r| r.id == "no-clone-element").unwrap();
+        assert!(rule.pattern.as_ref().unwrap() == "cloneElement");
+    }
+
+    #[test]
+    fn no_react_children_api_pattern() {
+        let re = regex_for(Preset::React, "no-react-children-api");
+        assert!(re.is_match("Children.map(children, child =>"));
+        assert!(re.is_match("React.Children.forEach(children,"));
+        assert!(re.is_match("Children.toArray(children)"));
+        assert!(!re.is_match("children.map("));
+    }
+
+    #[test]
+    fn no_direct_window_listener_pattern() {
+        let re = regex_for(Preset::React, "no-direct-window-listener");
+        assert!(re.is_match("window.addEventListener('keydown',"));
+        assert!(re.is_match("window.removeEventListener('resize',"));
+        assert!(!re.is_match("win.addEventListener('keydown',"));
+    }
+
+    #[test]
+    fn no_direct_document_query_pattern() {
+        let re = regex_for(Preset::React, "no-direct-document-query");
+        assert!(re.is_match("document.getElementById('root')"));
+        assert!(re.is_match("document.querySelector('.modal')"));
+        assert!(re.is_match("document.querySelectorAll('button')"));
+        assert!(!re.is_match("ref.current"));
     }
 
     #[test]
