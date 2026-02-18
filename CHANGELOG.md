@@ -1,5 +1,10 @@
 # Changelog
 
+## [v1.2.2] - 2026-02-17
+
+### Other
+- rebuild npm platform packages with binaries via OIDC publishing
+
 ## [v1.2.1] - 2026-02-17
 
 ### Other
